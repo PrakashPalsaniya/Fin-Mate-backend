@@ -1,12 +1,15 @@
-const redis = require('redis');
+const { createClient } = require('redis');
 
 // In-memory fallback storage when Redis is not available
 let inMemoryStorage = new Map();
 
-const client = redis.createClient({
-    host: process.env.REDIS_HOST || 'localhost',
-    port: process.env.REDIS_PORT || 6379,
-    password: process.env.REDIS_PASSWORD || undefined,
+const client = createClient({
+    username: 'default',
+    password: 'Od4tpLX0luCkQFZ45AF8the0haNR9cHz',
+    socket: {
+        host: 'redis-16393.crce217.ap-south-1-1.ec2.redns.redis-cloud.com',
+        port:  16393
+    }
 });
 
 let redisConnected = false;
