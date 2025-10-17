@@ -47,13 +47,19 @@ const verifyOTP = async (email, otp) => {
 
 // Send OTP via email
 const sendOTPEmail = async (email, otp) => {
-    const transporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: {
-            user: process.env.EMAIL_USER,
-            pass: process.env.EMAIL_PASS, // App password for Gmail
-        },
-    });
+   const transporter = nodemailer.createTransport({
+  host: "smtp-relay.brevo.com",
+  port: 587,
+  secure: false, 
+  auth: {
+    user: process.env.BREVO_USER, 
+    pass: process.env.BREVO_PASS, 
+  },
+  tls: {
+    rejectUnauthorized: false, 
+  },
+});
+
 
     const mailOptions = {
         from: process.env.EMAIL_USER,
