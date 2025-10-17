@@ -65,7 +65,7 @@ const sendOTPEmail = async (email, otp) => {
       <p>This code is valid for 10 minutes.</p>
     </div>
   `;
-  sendSmtpEmail.sender = { name: "FinMate", email: "no-reply@finmate.com" };
+  sendSmtpEmail.sender = { name: "FinMate", email: "pkjat6376060840@gmail.com" };
   sendSmtpEmail.to = [{ email: email }];
 
   await apiInstance.sendTransacEmail(sendSmtpEmail);
