@@ -13,12 +13,27 @@ exports.addExpense = async (req, res) => {
             return res.status(400).json({ message: "All fields are required" });
         }
 
+        // Map category to icon
+        const iconMap = {
+            rent: "LuHome",
+            entertainment: "LuGamepad2",
+            food: "LuUtensils",
+            transport: "LuCar",
+            utilities: "LuZap",
+            healthcare: "LuHeart",
+            education: "LuGraduationCap",
+            shopping: "LuShoppingBag",
+            others: "LuUtensils"
+        };
+        const icon = iconMap[category.toLowerCase()] || "LuUtensils";
+
         const newExpense = new Expense({
             userId,
             title,
             category,
             amount,
-            date: new Date(date)
+            date: new Date(date),
+            icon
         })
 
         await newExpense.save();
