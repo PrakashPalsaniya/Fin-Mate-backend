@@ -2,35 +2,48 @@ const axios = require("axios");
 const crypto = require("crypto");
 const Income = require("../models/Income.js");
 const Expense = require("../models/Expense.js");
-const AISummaryCache = require("../models/AISummaryCache.js");
+const redis = require("../config/redis.js");
 const { Types } = require("mongoose");
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const CACHE_TTL = 60 * 60 * 24; // 24 hours in seconds
 
-// Helper function to generate hash from financial data
+// STABLE hash function - only uses totals and sorted categories
 const generateDataHash = (financialData) => {
+  // Sort categories alphabetically for consistency
+  const sortedExpenseCategories = [...financialData.expenseCategories]
+    .sort((a, b) => String(a.category).localeCompare(String(b.category)))
+    .map(c => ({
+      category: c.category,
+      amount: Math.round(c.amount)
+    }));
+
+  const sortedIncomeCategories = [...financialData.incomeCategories]
+    .sort((a, b) => String(a.category).localeCompare(String(b.category)))
+    .map(c => ({
+      category: c.category,
+      amount: Math.round(c.amount)
+    }));
+
   const dataString = JSON.stringify({
-    totalIncome: financialData.totalIncome,
-    totalExpenses: financialData.totalExpenses,
-    expenseCategories: financialData.expenseCategories,
-    incomeCategories: financialData.incomeCategories
+    totalIncome: Math.round(financialData.totalIncome),
+    totalExpenses: Math.round(financialData.totalExpenses),
+    expenseCategories: sortedExpenseCategories,
+    incomeCategories: sortedIncomeCategories
   });
   
-  return crypto.createHash('sha256').update(dataString).digest('hex');
+  return crypto.createHash('sha256').update(dataString).digest('hex').substring(0, 16);
 };
 
 // Helper function to extract first valid JSON from text
 const extractFirstValidJSON = (text) => {
-  // Remove markdown code blocks if present
   let cleanText = text.replace(/``````\s*/g, '');
   
-  // Find the first opening brace
   const firstOpen = cleanText.indexOf('{');
   if (firstOpen === -1) {
     throw new Error('No JSON object found in response');
   }
 
-  // Try to find the matching closing brace
   let braceCount = 0;
   let inString = false;
   let escapeNext = false;
@@ -38,7 +51,6 @@ const extractFirstValidJSON = (text) => {
   for (let i = firstOpen; i < cleanText.length; i++) {
     const char = cleanText[i];
     
-    // Handle escape sequences in strings
     if (escapeNext) {
       escapeNext = false;
       continue;
@@ -49,20 +61,17 @@ const extractFirstValidJSON = (text) => {
       continue;
     }
     
-    // Track if we're inside a string
     if (char === '"') {
       inString = !inString;
       continue;
     }
     
-    // Only count braces outside of strings
     if (!inString) {
       if (char === '{') {
         braceCount++;
       } else if (char === '}') {
         braceCount--;
         
-        // Found matching closing brace
         if (braceCount === 0) {
           const jsonStr = cleanText.substring(firstOpen, i + 1);
           try {
@@ -88,43 +97,78 @@ const generateAISummary = async (req, res) => {
     }
 
     const userObjectId = new Types.ObjectId(String(userId));
-    console.log("userObjectId:", userObjectId);
+    console.log("User ID:", userId);
 
-    // Fetch Income and Expense Data
+    // Date ranges for analysis
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
+
+    // Fetch Current Month Income and Expense Data
     const [totalIncomeResult] = await Income.aggregate([
-      { $match: { userId: userObjectId } },
+      { $match: { userId: userObjectId, date: { $gte: thirtyDaysAgo } } },
       { $group: { _id: null, total: { $sum: "$amount" } } },
     ]);
 
     const [totalExpenseResult] = await Expense.aggregate([
-      { $match: { userId: userObjectId } },
+      { $match: { userId: userObjectId, date: { $gte: thirtyDaysAgo } } },
       { $group: { _id: null, total: { $sum: "$amount" } } },
+    ]);
+
+    // Previous month data for trend analysis
+    const [previousMonthIncomeResult] = await Income.aggregate([
+      { 
+        $match: { 
+          userId: userObjectId,
+          date: { $gte: sixtyDaysAgo, $lt: thirtyDaysAgo }
+        }
+      },
+      { $group: { _id: null, total: { $sum: "$amount" } } }
+    ]);
+
+    const [previousMonthExpenseResult] = await Expense.aggregate([
+      { 
+        $match: { 
+          userId: userObjectId,
+          date: { $gte: sixtyDaysAgo, $lt: thirtyDaysAgo }
+        }
+      },
+      { $group: { _id: null, total: { $sum: "$amount" } } }
     ]);
 
     const totalIncome = totalIncomeResult?.total || 0;
     const totalExpenses = totalExpenseResult?.total || 0;
     const totalBalance = totalIncome - totalExpenses;
-    const savingsRate =
-      totalIncome > 0
-        ? ((totalIncome - totalExpenses) / totalIncome) * 100
-        : 0;
+    const savingsRate = totalIncome > 0 
+      ? ((totalIncome - totalExpenses) / totalIncome) * 100 
+      : 0;
+
+    // Calculate trends
+    const previousIncome = previousMonthIncomeResult?.total || 0;
+    const previousExpenses = previousMonthExpenseResult?.total || 0;
+    
+    const incomeChange = previousIncome > 0 
+      ? ((totalIncome - previousIncome) / previousIncome * 100).toFixed(1)
+      : null;
+    
+    const expenseChange = previousExpenses > 0
+      ? ((totalExpenses - previousExpenses) / previousExpenses * 100).toFixed(1)
+      : null;
 
     // Expense categories
     const expenseCategories = await Expense.aggregate([
-      { $match: { userId: userObjectId } },
+      { $match: { userId: userObjectId, date: { $gte: thirtyDaysAgo } } },
       { $group: { _id: "$category", total: { $sum: "$amount" } } },
       { $sort: { total: -1 } },
     ]);
 
     // Income categories
     const incomeCategories = await Income.aggregate([
-      { $match: { userId: userObjectId } },
+      { $match: { userId: userObjectId, date: { $gte: thirtyDaysAgo } } },
       { $group: { _id: "$category", total: { $sum: "$amount" } } },
       { $sort: { total: -1 } },
     ]);
 
     // Recent transactions
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const recentExpenses = await Expense.find({
       userId,
       date: { $gte: thirtyDaysAgo },
@@ -139,12 +183,28 @@ const generateAISummary = async (req, res) => {
       .sort({ date: -1 })
       .limit(10);
 
-    // Prepare data
+    // Calculate spending velocity
+    const daysInMonth = 30;
+    const dailyExpenseRate = (totalExpenses / daysInMonth).toFixed(0);
+    const projectedMonthlyExpense = dailyExpenseRate * 30;
+
+    // Prepare enhanced financial data
     const financialData = {
       totalIncome,
       totalExpenses,
       totalBalance,
       savingsRate: parseFloat(savingsRate.toFixed(2)),
+      trends: {
+        incomeChange: incomeChange ? parseFloat(incomeChange) : null,
+        expenseChange: expenseChange ? parseFloat(expenseChange) : null,
+        incomeDirection: incomeChange > 0 ? 'increased' : incomeChange < 0 ? 'decreased' : 'stable',
+        expenseDirection: expenseChange > 0 ? 'increased' : expenseChange < 0 ? 'decreased' : 'stable'
+      },
+      spendingVelocity: {
+        dailyAverage: parseFloat(dailyExpenseRate),
+        projected: projectedMonthlyExpense,
+        remainingBudget: totalIncome - projectedMonthlyExpense
+      },
       expenseCategories: expenseCategories.map((c) => ({
         category: c._id,
         amount: c.total,
@@ -167,68 +227,119 @@ const generateAISummary = async (req, res) => {
       })),
     };
 
-    // Generate hash of current financial data
-    const currentDataHash = generateDataHash(financialData);
-    console.log("Current data hash:", currentDataHash);
+    // HYBRID CACHE KEY: Date + Data Hash
+    // Regenerates when EITHER date changes OR data changes
+    const today = new Date().toISOString().split('T')[0];
+    const dataHash = generateDataHash(financialData);
+    const cacheKey = `ai_summary:${userId}:${today}:${dataHash}`;
+    
+    console.log("Date:", today);
+    console.log("Data hash:", dataHash);
+    console.log("Cache key:", cacheKey);
 
-    // Check if we have a cached summary with the same hash
-    const cachedSummary = await AISummaryCache.findOne({
-      userId: userObjectId,
-      dataHash: currentDataHash
-    });
-
-    if (cachedSummary) {
-      console.log("✅ Cache HIT - Returning cached AI summary");
-      return res.json({
-        success: true,
-        data: financialData,
-        aiSummary: cachedSummary.aiSummary,
-        generatedAt: cachedSummary.generatedAt.toISOString(),
-        cached: true,
-        message: "Returned cached summary (data unchanged)"
-      });
+    // Check Redis cache first
+    try {
+      const cachedData = await redis.get(cacheKey);
+      
+      if (cachedData) {
+        const parsedCache = JSON.parse(cachedData);
+        console.log("✅ Redis Cache HIT - Returning cached summary");
+        
+        return res.json({
+          success: true,
+          data: financialData,
+          aiSummary: parsedCache.aiSummary,
+          generatedAt: parsedCache.generatedAt,
+          cached: true,
+          message: "Cached summary (data unchanged today)"
+        });
+      }
+    } catch (cacheError) {
+      console.error("Redis cache read error:", cacheError);
     }
 
     console.log("❌ Cache MISS - Generating new AI summary");
 
-    // Gemini Prompt with stronger JSON instructions
-    const prompt = `You are an expert AI financial assistant. Analyze the following user's financial data and create an engaging, compact, and useful summary that looks visually appealing inside a dashboard card.
+    // Clean up old cache entries for this user today (optional)
+    try {
+      const pattern = `ai_summary:${userId}:${today}:*`;
+      let cursor = '0';
+      let keysToDelete = [];
+      
+      do {
+        const result = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+        cursor = result[0];
+        keysToDelete = keysToDelete.concat(result[1]);
+      } while (cursor !== '0');
 
-✅ Structure your response as JSON in this EXACT format (no extra text before or after):
+      if (keysToDelete.length > 0 && keysToDelete.length < 10) { // Safety check
+        await redis.del(...keysToDelete);
+        console.log(`🗑️  Deleted ${keysToDelete.length} old cache entries`);
+      }
+    } catch (err) {
+      console.error("Failed to delete old keys:", err);
+    }
+
+    // Enhanced conversational prompt
+    const prompt = `You are a personal financial coach analyzing data for a real user. Be conversational, specific, and actionable—like talking to a friend about their money.
+
+USER'S FINANCIAL SNAPSHOT (Last 30 Days):
+💰 Total Income: ₹${totalIncome.toLocaleString('en-IN')}
+💸 Total Expenses: ₹${totalExpenses.toLocaleString('en-IN')}
+💎 Current Balance: ₹${totalBalance.toLocaleString('en-IN')}
+📊 Savings Rate: ${savingsRate.toFixed(1)}%
+📈 Daily Spending: ₹${dailyExpenseRate}/day
+
+SPENDING BREAKDOWN:
+${expenseCategories.length > 0 ? expenseCategories.map(c => `- ${c._id}: ₹${c.total.toLocaleString('en-IN')} (${((c.total/totalExpenses)*100).toFixed(0)}%)`).join('\n') : '- No expenses recorded'}
+
+INCOME SOURCES:
+${incomeCategories.length > 0 ? incomeCategories.map(c => `- ${c._id}: ₹${c.total.toLocaleString('en-IN')}`).join('\n') : '- No income recorded'}
+
+TRENDS (vs Previous Month):
+${incomeChange ? `- Income ${incomeChange > 0 ? '↑' : '↓'} ${Math.abs(incomeChange)}%` : '- First month tracked'}
+${expenseChange ? `- Expenses ${expenseChange > 0 ? '↑' : '↓'} ${Math.abs(expenseChange)}%` : '- First month tracked'}
+
+RECENT ACTIVITY:
+${recentExpenses.length > 0 ? `Top Expenses: ${recentExpenses.slice(0, 3).map(e => `${e.title} (₹${e.amount.toLocaleString('en-IN')})`).join(', ')}` : 'No recent expenses'}
+
+INSTRUCTIONS:
+1. **Be SPECIFIC with numbers**: Don't say "good savings"—say "Your ${savingsRate.toFixed(1)}% savings rate means you're keeping ₹${totalBalance.toLocaleString('en-IN')} out of ₹${totalIncome.toLocaleString('en-IN')} earned"
+2. **Identify THE biggest insight**: What's the most important thing they should know?
+3. **Give ACTIONABLE steps with exact amounts**: Instead of "save more", say "Move ₹10,000 to a recurring deposit earning 7% annually"
+4. **Notice patterns in categories**: If a category dominates expenses, call it out specifically
+5. **Be encouraging but realistic**: Acknowledge challenges if expenses are climbing
+6. **Use conversational tone**: Write like you're texting a friend, not generating a report
+
+Respond in this EXACT JSON format:
 {
-  "summaryTitle": "Short catchy title about the user's financial situation",
+  "summaryTitle": "One punchy sentence about their financial situation",
+  "insightsSummary": "2-3 conversational sentences that capture the big picture with specific numbers",
   "highlights": [
-    "💰 Key insight #1 about income/spending balance",
-    "📊 Key insight #2 about growth or savings rate",
-    "⚡ Key insight #3 on unusual trends or smart moves"
+    "Use SPECIFIC numbers and comparisons from their actual data",
+    "Call out the BIGGEST expense category with percentage if applicable",
+    "Mention trend with context if data exists"
   ],
   "smartMoves": [
-    "✅ Practical tip #1 to save or invest better",
-    "✅ Practical tip #2 about spending or budgeting",
-    "✅ Practical tip #3 about long-term financial habits"
+    "Specific action tied to their actual data with real numbers",
+    "Investment suggestion with exact amount based on their balance",
+    "Automation tip that makes sense for their situation"
   ],
   "aiScore": {
-    "financialHealth": "Good | Moderate | Poor",
-    "savingsEfficiency": "High | Medium | Low",
-    "riskLevel": "Low | Medium | High"
+    "financialHealth": "Excellent | Good | Fair | Needs Attention",
+    "savingsEfficiency": "Outstanding | High | Moderate | Low",
+    "riskLevel": "Very Low | Low | Moderate | High"
   },
   "nextSteps": [
-    "🚀 Simple, actionable suggestion #1 for the user",
-    "💡 Simple, actionable suggestion #2 for upcoming month"
+    "Concrete action with deadline based on their financial situation",
+    "Specific goal suggestion with numbers",
+    "Practical tracking suggestion"
   ]
 }
 
-✨ Tone:
-- Use emojis and compact bullet points (max 2 lines each).
-- Be realistic, positive, and insightful — no generic advice.
-- Do NOT add long explanations, just clear and useful insights.
--Every Balance Shown IN INR whether expense ,income or balance 
-📊 Financial Data:
-${JSON.stringify(financialData, null, 2)}
+CRITICAL: Use ₹ symbol and Indian number formatting. Be SPECIFIC to their data, not generic advice. If they have no expenses or income, acknowledge it and give starter advice.`;
 
-IMPORTANT: Return ONLY ONE valid JSON object. Do not generate multiple variations. No markdown formatting, no extra text.`;
-
-    // Gemini REST API Call with response schema
+    // Gemini REST API Call
     const response = await axios.post(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${GEMINI_API_KEY}`,
       {
@@ -239,10 +350,10 @@ IMPORTANT: Return ONLY ONE valid JSON object. Do not generate multiple variation
           },
         ],
         generationConfig: {
-          temperature: 0.7,
+          temperature: 0.8,
           topK: 40,
           topP: 0.95,
-          maxOutputTokens: 1024,
+          maxOutputTokens: 2048,
           responseMimeType: "application/json"
         }
       },
@@ -253,9 +364,7 @@ IMPORTANT: Return ONLY ONE valid JSON object. Do not generate multiple variation
       }
     );
 
-    // Extract text safely
-    const rawText =
-      response.data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const rawText = response.data.candidates?.[0]?.content?.parts?.[0]?.text || "";
 
     if (!rawText) {
       console.error("No response text from Gemini");
@@ -265,11 +374,10 @@ IMPORTANT: Return ONLY ONE valid JSON object. Do not generate multiple variation
       });
     }
 
-    console.log("Raw Gemini response:", rawText.substring(0, 200) + "...");
+    console.log("Raw Gemini response preview:", rawText.substring(0, 150) + "...");
 
     let parsed;
     try {
-      // Try extracting first valid JSON
       parsed = extractFirstValidJSON(rawText);
       console.log("✅ Successfully parsed AI response");
     } catch (e) {
@@ -278,34 +386,30 @@ IMPORTANT: Return ONLY ONE valid JSON object. Do not generate multiple variation
       return res.status(500).json({ 
         message: "Failed to parse AI response", 
         error: e.message,
-        raw: rawText,
         success: false 
       });
     }
 
-    // Save to cache
+    const generatedAt = new Date().toISOString();
+
+    // Save to Redis cache with TTL
     try {
-      await AISummaryCache.findOneAndUpdate(
-        { userId: userObjectId },
-        {
-          userId: userObjectId,
-          dataHash: currentDataHash,
-          financialData: financialData,
-          aiSummary: parsed,
-          generatedAt: new Date()
-        },
-        { upsert: true, new: true }
-      );
-      console.log("✅ Cached new AI summary");
+      const cacheData = {
+        aiSummary: parsed,
+        generatedAt
+      };
+      
+      await redis.setEx(cacheKey, CACHE_TTL, JSON.stringify(cacheData));
+      console.log(`✅ Cached AI summary in Redis (TTL: ${CACHE_TTL}s = 24h)`);
     } catch (cacheError) {
-      console.error("Failed to cache summary:", cacheError);
+      console.error("Failed to cache in Redis:", cacheError);
     }
 
     res.json({
       success: true,
       data: financialData,
       aiSummary: parsed,
-      generatedAt: new Date().toISOString(),
+      generatedAt,
       cached: false,
       message: "Generated new AI summary"
     });
