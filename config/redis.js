@@ -4,12 +4,12 @@ const { createClient } = require('redis');
 let inMemoryStorage = new Map();
 
 const client = createClient({
-    username: 'default',
-    password: 'Od4tpLX0luCkQFZ45AF8the0haNR9cHz',
-    socket: {
-        host: 'redis-16393.crce217.ap-south-1-1.ec2.redns.redis-cloud.com',
-        port: 16393
-    }
+  username: "default",
+  password: "Od4tpLX0luCkQFZ45AF8the0haNR9cHz",
+  socket: {
+    host: "redis-12569.c13.us-east-1-3.ec2.cloud.redislabs.com",
+    port: 12569
+  }
 });
 
 let redisConnected = false;
