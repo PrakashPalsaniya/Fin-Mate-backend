@@ -56,6 +56,13 @@ app.use(
 
 app.use(express.json());
 
+app.get("/", (_req, res) => {
+    res.status(200).json({
+        ok: true,
+        service: "finmate-backend",
+    });
+});
+
 app.use(session({
     secret: process.env.SESSION_SECRET || "your-session-secret",
     resave: false,
@@ -127,12 +134,15 @@ process.on("SIGTERM", async () => {
 
 const startServer = async () => {
     await connectDB();
-    await client.connect();
-    startSummaryScheduler();
 
     const port = process.env.PORT || 5000;
     app.listen(port, () => {
         console.log(`server running on port ${port}`)
+    });
+
+    startSummaryScheduler();
+    client.connect().catch((error) => {
+        console.error("Redis startup skipped, using in-memory storage:", error.message);
     });
 };
 

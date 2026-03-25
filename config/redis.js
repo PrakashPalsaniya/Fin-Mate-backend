@@ -2,6 +2,7 @@ const { createClient } = require("redis");
 
 // In-memory fallback storage when Redis is not available
 const inMemoryStorage = new Map();
+const isProduction = process.env.NODE_ENV === "production";
 
 const normalizeRedisUrl = (rawUrl) => {
     if (!rawUrl) {
@@ -20,57 +21,88 @@ const normalizeRedisUrl = (rawUrl) => {
 
 const redisUrl = normalizeRedisUrl(process.env.REDIS_URL);
 const redisPort = Number(process.env.REDIS_PORT || 6379);
+const redisConnectTimeout = Number(process.env.REDIS_CONNECT_TIMEOUT_MS || 5000);
+const redisMaxRetries = Number(process.env.REDIS_MAX_RETRIES || 3);
+const redisDisabled = String(process.env.REDIS_DISABLED || "").trim().toLowerCase() === "true";
+const hasExplicitRedisConfig = Boolean(
+    redisUrl ||
+    process.env.REDIS_HOST ||
+    process.env.REDIS_USERNAME ||
+    process.env.REDIS_PASSWORD
+);
+const shouldAttemptRedis = !redisDisabled && (hasExplicitRedisConfig || !isProduction);
 let client;
 
-try {
-    client = createClient(
-        redisUrl
-            ? { url: redisUrl }
-            : {
-                username: process.env.REDIS_USERNAME || undefined,
-                password: process.env.REDIS_PASSWORD || undefined,
-                socket: {
-                    host: process.env.REDIS_HOST || "127.0.0.1",
-                    port: redisPort,
-                },
-            }
-    );
-} catch (error) {
-    console.error("Invalid Redis configuration, falling back to in-memory storage:", error.message);
-    client = createClient({
-        socket: {
-            host: "127.0.0.1",
-            port: 6379,
-        },
-    });
+const buildSocketConfig = (overrides = {}) => ({
+    connectTimeout: redisConnectTimeout,
+    reconnectStrategy: (retries) => {
+        if (retries >= redisMaxRetries) {
+            console.warn("Redis reconnect limit reached, switching to in-memory storage.");
+            return false;
+        }
+
+        return Math.min((retries + 1) * 500, 2000);
+    },
+    ...overrides,
+});
+
+if (shouldAttemptRedis) {
+    try {
+        client = createClient(
+            redisUrl
+                ? {
+                    url: redisUrl,
+                    socket: buildSocketConfig(),
+                }
+                : {
+                    username: process.env.REDIS_USERNAME || undefined,
+                    password: process.env.REDIS_PASSWORD || undefined,
+                    socket: buildSocketConfig({
+                        host: process.env.REDIS_HOST || "127.0.0.1",
+                        port: redisPort,
+                    }),
+                }
+        );
+    } catch (error) {
+        console.error("Invalid Redis configuration, falling back to in-memory storage:", error.message);
+        client = null;
+    }
+} else {
+    console.warn("Redis disabled or not configured for this environment. Using in-memory storage.");
 }
 
 let redisConnected = false;
 let connectPromise = null;
 
-client.on("error", (err) => {
-    console.error("Redis Client Error:", err.message);
-    redisConnected = false;
-});
+if (client) {
+    client.on("error", (err) => {
+        console.error("Redis Client Error:", err.message);
+        redisConnected = false;
+    });
 
-client.on("connect", () => {
-    console.log("Redis Connected");
-    redisConnected = true;
-});
+    client.on("connect", () => {
+        console.log("Redis Connected");
+        redisConnected = true;
+    });
 
-client.on("ready", () => {
-    console.log("Redis Client Ready");
-    redisConnected = true;
-});
+    client.on("ready", () => {
+        console.log("Redis Client Ready");
+        redisConnected = true;
+    });
 
-client.on("end", () => {
-    console.log("Redis Connection Ended");
-    redisConnected = false;
-});
+    client.on("end", () => {
+        console.log("Redis Connection Ended");
+        redisConnected = false;
+    });
+}
 
 // Wrapper functions with fallback to in-memory storage
 const redisWrapper = {
     connect: async () => {
+        if (!client) {
+            return;
+        }
+
         if (redisConnected || client.isOpen) {
             return;
         }
@@ -184,7 +216,7 @@ const redisWrapper = {
 
     // Quit connection
     quit: async () => {
-        if (client.isOpen) {
+        if (client?.isOpen) {
             return await client.quit();
         }
     },
