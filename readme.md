@@ -71,6 +71,8 @@ BREVO_API_KEY=your-brevo-api-key
 REDIS_URL=redis://localhost:6379
 GEMINI_API_KEY=your-gemini-api-key
 GEMINI_MODEL=gemini-2.5-flash
+OPENROUTER_API_KEY=your-openrouter-api-key
+TELEGRAM_PARSER_OPENROUTER_MODEL=openai/gpt-4o-mini
 ```
 
 4. Start the server:
@@ -151,6 +153,8 @@ The current backend code expects these main variables:
 - `REDIS_URL` or `REDIS_HOST` / `REDIS_PORT`
 - `GEMINI_API_KEY`
 - `GEMINI_MODEL`
+- `OPENROUTER_API_KEY`
+- `TELEGRAM_PARSER_OPENROUTER_MODEL`
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_BOT_USERNAME`
 - `TELEGRAM_WEBHOOK_URL`
@@ -167,9 +171,11 @@ The current backend code expects these main variables:
 5. The backend parses the text, replies with a confirmation prompt, and saves only after the user taps `Confirm`.
 6. Users can also request `/summary daily`, `/summary weekly`, or `/summary monthly`.
 
+Telegram transaction parsing uses the OpenRouter chat completions API. The rest of the AI features can keep using Gemini independently.
+
 ## Telegram Setup
 
-1. Add the Telegram variables to `backend/.env`.
+1. Add the Telegram variables and `OPENROUTER_API_KEY` to `backend/.env`.
 2. Expose the backend to a public HTTPS URL.
 3. Run `npm run telegram:webhook:set`.
 4. Verify with `npm run telegram:webhook:info`.

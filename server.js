@@ -24,6 +24,8 @@ const telegramRoutes = require("./routes/telegramRoutes.js")
 const summaryDeliveryRoutes = require("./routes/summaryDeliveryRoutes.js")
 const { startSummaryScheduler, stopSummaryScheduler } = require("./services/summarySchedulerService.js")
 
+const normalizeOrigin = (origin = "") => String(origin || "").trim().replace(/\/+$/, "");
+
 const getAllowedOrigins = () => {
     const configuredOrigins =
         process.env.CLIENT_URL ||
@@ -32,7 +34,7 @@ const getAllowedOrigins = () => {
 
     return configuredOrigins
         .split(",")
-        .map((origin) => origin.trim())
+        .map((origin) => normalizeOrigin(origin))
         .filter(Boolean);
 };
 
@@ -42,10 +44,13 @@ const isProduction = process.env.NODE_ENV === "production";
 app.use(
     cors({
         origin: (origin, callback) => {
-            if (!origin || allowedOrigins.includes(origin)) {
+            const normalizedOrigin = normalizeOrigin(origin);
+
+            if (!origin || allowedOrigins.includes(normalizedOrigin)) {
                 return callback(null, true);
             }
 
+            console.error("Blocked by CORS:", normalizedOrigin);
             return callback(new Error("Origin not allowed by CORS"));
         },
         methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],

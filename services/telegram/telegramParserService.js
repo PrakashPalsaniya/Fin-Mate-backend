@@ -1,20 +1,26 @@
 const axios = require("axios");
 const { TRANSACTION_ICON_MAP } = require("../../utils/transactionConfig.js");
 const {
-    GEMINI_API_KEY,
-    getGeminiRetryDelayMs,
-    getGeminiUrl,
-    isGeminiQuotaError,
-    logGeminiError,
-} = require("../../utils/geminiClient.js");
+    OPENROUTER_API_KEY,
+    buildOpenRouterHeaders,
+    getOpenRouterChatCompletionsUrl,
+    getOpenRouterRetryDelayMs,
+    isOpenRouterRateLimitError,
+    logOpenRouterError,
+} = require("../../utils/openRouterClient.js");
 const { parseAIJSON } = require("../../utils/aiJson.js");
 
-const TELEGRAM_PARSER_GEMINI_QUOTA_COOLDOWN_MS = Number(
-    process.env.TELEGRAM_PARSER_GEMINI_QUOTA_COOLDOWN_MS || 60000
+const TELEGRAM_PARSER_OPENROUTER_COOLDOWN_MS = Number(
+    process.env.TELEGRAM_PARSER_OPENROUTER_COOLDOWN_MS || 60000
 );
-const TELEGRAM_PARSER_USE_GEMINI =
-    String(process.env.TELEGRAM_PARSER_USE_GEMINI || "true").trim().toLowerCase() !== "false";
-let geminiQuotaBlockedUntil = 0;
+const TELEGRAM_PARSER_USE_OPENROUTER =
+    String(process.env.TELEGRAM_PARSER_USE_OPENROUTER || "true").trim().toLowerCase() !== "false";
+const TELEGRAM_PARSER_OPENROUTER_MODEL = String(
+    process.env.TELEGRAM_PARSER_OPENROUTER_MODEL ||
+        process.env.OPENROUTER_MODEL ||
+        "openai/gpt-4o-mini"
+).trim();
+let openRouterBlockedUntil = 0;
 
 const ALLOWED_CATEGORIES = Object.freeze({
     income: Object.keys(TRANSACTION_ICON_MAP.income),
@@ -286,23 +292,70 @@ const buildUnclearResult = (reply) => ({
         "I could not confidently extract a transaction. Try a message like 'Spent 420 on groceries today' or 'Received 15000 salary'.",
 });
 
-const buildGeminiQuotaFallbackResult = () => ({
+const buildOpenRouterUnavailableResult = () => ({
     status: "unclear",
     mode: "fallback",
     reply:
         "Transaction parsing is currently unavailable. Please try again later.",
 });
 
-const parseTransactionWithGemini = async ({ text, timeZone }) => {
-    const today = getTodayDateString(timeZone);
-    const prompt = `You extract finance transactions from Telegram messages for an expense tracker.
+const extractOpenRouterMessageText = (responseData = {}) => {
+    const content = responseData?.choices?.[0]?.message?.content;
 
-Return ONLY valid JSON with this shape:
+    if (typeof content === "string") {
+        return content;
+    }
+
+    if (!Array.isArray(content)) {
+        return "";
+    }
+
+    return content
+        .map((item) => {
+            if (typeof item === "string") {
+                return item;
+            }
+
+            if (typeof item?.text === "string") {
+                return item.text;
+            }
+
+            if (typeof item?.content === "string") {
+                return item.content;
+            }
+
+            return "";
+        })
+        .join("")
+        .trim();
+};
+
+const parseTransactionWithOpenRouter = async ({ text, timeZone }) => {
+    const today = getTodayDateString(timeZone);
+    const allowedCategoryList = [
+        ...ALLOWED_CATEGORIES.expense,
+        ...ALLOWED_CATEGORIES.income,
+    ].join(", ");
+    const response = await axios.post(
+        getOpenRouterChatCompletionsUrl(),
+        {
+            model: TELEGRAM_PARSER_OPENROUTER_MODEL,
+            messages: [
+                {
+                    role: "system",
+                    content:
+                        "You extract finance transactions from Telegram messages for an expense tracker. Return only a single valid JSON object and no markdown.",
+                },
+                {
+                    role: "user",
+                    content: `Extract one finance transaction from this Telegram message.
+
+Return ONLY valid JSON with this exact shape:
 {
   "intent": "transaction" | "unclear" | "other",
   "type": "expense" | "income" | null,
   "title": "short title",
-  "category": "one of: rent, entertainment, food, transport, utilities, healthcare, education, shopping, others, salary, freelance, business, investment",
+  "category": "one of: ${allowedCategoryList}",
   "amount": 0,
   "date": "YYYY-MM-DD",
   "confidence": 0.0,
@@ -317,33 +370,21 @@ Rules:
 - If title is missing, infer a short title from the text.
 - Never include markdown or code fences.
 
-User message: "${text}"`;
-
-    const response = await axios.post(
-        getGeminiUrl(),
-        {
-            contents: [
-                {
-                    role: "user",
-                    parts: [{ text: prompt }],
+User message: "${text}"`,
                 },
             ],
-            generationConfig: {
-                temperature: 0.1,
-                topK: 16,
-                topP: 0.8,
-                maxOutputTokens: 400,
-                responseMimeType: "application/json",
+            temperature: 0.1,
+            max_tokens: 400,
+            response_format: {
+                type: "json_object",
             },
         },
         {
-            headers: {
-                "Content-Type": "application/json",
-            },
+            headers: buildOpenRouterHeaders(),
         }
     );
 
-    const rawText = response.data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const rawText = extractOpenRouterMessageText(response.data);
     const parsed = parseAIJSON(rawText);
 
     if (String(parsed.intent || "").toLowerCase() !== "transaction") {
@@ -404,15 +445,15 @@ const parseTransactionHeuristically = ({ text, timeZone }) => {
     });
 };
 
-const getGeminiQuotaCooldownRemainingMs = () =>
-    Math.max(0, geminiQuotaBlockedUntil - Date.now());
+const getOpenRouterCooldownRemainingMs = () =>
+    Math.max(0, openRouterBlockedUntil - Date.now());
 
-const activateGeminiQuotaCooldown = (error) => {
+const activateOpenRouterCooldown = (error) => {
     const retryDelayMs = Math.max(
-        getGeminiRetryDelayMs(error),
-        TELEGRAM_PARSER_GEMINI_QUOTA_COOLDOWN_MS
+        getOpenRouterRetryDelayMs(error),
+        TELEGRAM_PARSER_OPENROUTER_COOLDOWN_MS
     );
-    geminiQuotaBlockedUntil = Date.now() + retryDelayMs;
+    openRouterBlockedUntil = Date.now() + retryDelayMs;
 };
 
 const parseTelegramTransactionMessage = async ({ text, timeZone = "Asia/Kolkata" }) => {
@@ -422,16 +463,20 @@ const parseTelegramTransactionMessage = async ({ text, timeZone = "Asia/Kolkata"
         return buildUnclearResult("Send a transaction message in text, for example 'Spent 420 on groceries today'.");
     }
 
-    if (TELEGRAM_PARSER_USE_GEMINI && GEMINI_API_KEY && getGeminiQuotaCooldownRemainingMs() === 0) {
+    if (
+        TELEGRAM_PARSER_USE_OPENROUTER &&
+        OPENROUTER_API_KEY &&
+        getOpenRouterCooldownRemainingMs() === 0
+    ) {
         try {
-            return await parseTransactionWithGemini({
+            return await parseTransactionWithOpenRouter({
                 text: normalizedText,
                 timeZone,
             });
         } catch (error) {
-            if (isGeminiQuotaError(error)) {
-                activateGeminiQuotaCooldown(error);
-                logGeminiError("Telegram parser quota fallback", error);
+            if (isOpenRouterRateLimitError(error)) {
+                activateOpenRouterCooldown(error);
+                logOpenRouterError("Telegram parser rate-limit fallback", error);
 
                 const heuristicResult = parseTransactionHeuristically({
                     text: normalizedText,
@@ -445,10 +490,10 @@ const parseTelegramTransactionMessage = async ({ text, timeZone = "Asia/Kolkata"
                     };
                 }
 
-                return buildGeminiQuotaFallbackResult();
+                return buildOpenRouterUnavailableResult();
             }
 
-            logGeminiError("Telegram parser fallback", error);
+            logOpenRouterError("Telegram parser fallback", error);
         }
     }
 
