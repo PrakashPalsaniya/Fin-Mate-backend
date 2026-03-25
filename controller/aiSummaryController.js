@@ -4,38 +4,108 @@ const Income = require("../models/Income.js");
 const Expense = require("../models/Expense.js");
 const redis = require("../config/redis.js");
 const { Types } = require("mongoose");
+const { normalizeUserSettings } = require("../utils/userSettings.js");
+const { getZonedDateParts } = require("../utils/timezone.js");
 const {
   getGeminiUrl,
   isGeminiQuotaError,
   logGeminiError,
 } = require("../utils/geminiClient.js");
 const CACHE_TTL = 60 * 60 * 24; // 24 hours in seconds
+const FALLBACK_CACHE_TTL = Number(
+  process.env.AI_SUMMARY_FALLBACK_CACHE_TTL_SECONDS || 10 * 60
+);
+const AI_SUMMARY_CACHE_VERSION = 2;
 
-// STABLE hash function - only uses totals and sorted categories
-const generateDataHash = (financialData) => {
-  // Sort categories alphabetically for consistency
-  const sortedExpenseCategories = [...financialData.expenseCategories]
+const normalizeRoundedNumber = (value, precision = 2) =>
+  Number(Number(value || 0).toFixed(precision));
+
+const normalizeCategoryEntries = (items = []) =>
+  [...items]
     .sort((a, b) => String(a.category).localeCompare(String(b.category)))
-    .map(c => ({
+    .map((c) => ({
       category: c.category,
-      amount: Math.round(c.amount)
+      amount: normalizeRoundedNumber(c.amount),
     }));
 
-  const sortedIncomeCategories = [...financialData.incomeCategories]
-    .sort((a, b) => String(a.category).localeCompare(String(b.category)))
-    .map(c => ({
-      category: c.category,
-      amount: Math.round(c.amount)
-    }));
+const normalizeRecentTransactions = (items = []) =>
+  [...items]
+    .map((item) => ({
+      title: String(item.title || "").trim(),
+      category: String(item.category || "").trim(),
+      amount: normalizeRoundedNumber(item.amount),
+      date: String(item.date || "").trim(),
+    }))
+    .sort((left, right) =>
+      JSON.stringify(left).localeCompare(JSON.stringify(right))
+    );
 
+// Stable cache hash based on every prompt-relevant input.
+const generateSummaryInputHash = (financialData) => {
   const dataString = JSON.stringify({
-    totalIncome: Math.round(financialData.totalIncome),
-    totalExpenses: Math.round(financialData.totalExpenses),
-    expenseCategories: sortedExpenseCategories,
-    incomeCategories: sortedIncomeCategories
+    totalIncome: normalizeRoundedNumber(financialData.totalIncome),
+    totalExpenses: normalizeRoundedNumber(financialData.totalExpenses),
+    totalBalance: normalizeRoundedNumber(financialData.totalBalance),
+    savingsRate: normalizeRoundedNumber(financialData.savingsRate),
+    trends: {
+      incomeChange:
+        financialData.trends?.incomeChange === null ||
+        financialData.trends?.incomeChange === undefined
+          ? null
+          : normalizeRoundedNumber(financialData.trends.incomeChange),
+      expenseChange:
+        financialData.trends?.expenseChange === null ||
+        financialData.trends?.expenseChange === undefined
+          ? null
+          : normalizeRoundedNumber(financialData.trends.expenseChange),
+      incomeDirection: String(financialData.trends?.incomeDirection || "").trim(),
+      expenseDirection: String(financialData.trends?.expenseDirection || "").trim(),
+    },
+    spendingVelocity: {
+      dailyAverage: normalizeRoundedNumber(
+        financialData.spendingVelocity?.dailyAverage
+      ),
+      projected: normalizeRoundedNumber(financialData.spendingVelocity?.projected),
+      remainingBudget: normalizeRoundedNumber(
+        financialData.spendingVelocity?.remainingBudget
+      ),
+    },
+    expenseCategories: normalizeCategoryEntries(financialData.expenseCategories),
+    incomeCategories: normalizeCategoryEntries(financialData.incomeCategories),
+    recentExpenses: normalizeRecentTransactions(financialData.recentExpenses),
+    recentIncomes: normalizeRecentTransactions(financialData.recentIncomes),
   });
-  
-  return crypto.createHash('sha256').update(dataString).digest('hex').substring(0, 16);
+
+  return crypto
+    .createHash("sha256")
+    .update(dataString)
+    .digest("hex")
+    .substring(0, 16);
+};
+
+const buildAISummaryCacheKey = ({ userId, dateKey, inputHash }) =>
+  `ai_summary:v${AI_SUMMARY_CACHE_VERSION}:${userId}:${dateKey}:${inputHash}`;
+
+const cacheAISummaryPayload = async ({
+  cacheKey,
+  aiSummary,
+  generatedAt,
+  ttlSeconds,
+  fallback = false,
+}) => {
+  if (!cacheKey || !aiSummary || !ttlSeconds) {
+    return;
+  }
+
+  await redis.setEx(
+    cacheKey,
+    ttlSeconds,
+    JSON.stringify({
+      aiSummary,
+      generatedAt,
+      fallback,
+    })
+  );
 };
 
 const stripCodeFences = (text = "") =>
@@ -518,6 +588,7 @@ const generateAISummary = async (req, res) => {
   try {
     console.log("AI Summary request received");
     const userId = req.user?.id;
+    const userSettings = normalizeUserSettings(req.user?.settings || {});
 
     if (!userId) {
       return res.status(400).json({ message: "User ID not found" });
@@ -655,11 +726,14 @@ const generateAISummary = async (req, res) => {
     };
     const overview = buildSummaryOverview(financialData);
 
-    // HYBRID CACHE KEY: Date + Data Hash
-    // Regenerates when EITHER date changes OR data changes
-    const today = new Date().toISOString().split('T')[0];
-    const dataHash = generateDataHash(financialData);
-    const cacheKey = `ai_summary:${userId}:${today}:${dataHash}`;
+    // Versioned, timezone-aware cache key: day bucket + full prompt input hash.
+    const today = getZonedDateParts(new Date(), userSettings.timezone).dateKey;
+    const dataHash = generateSummaryInputHash(financialData);
+    const cacheKey = buildAISummaryCacheKey({
+      userId,
+      dateKey: today,
+      inputHash: dataHash,
+    });
     
     console.log("Date:", today);
     console.log("Data hash:", dataHash);
@@ -680,7 +754,16 @@ const generateAISummary = async (req, res) => {
           aiSummary: normalizeAISummary(parsedCache.aiSummary, financialData),
           generatedAt: parsedCache.generatedAt,
           cached: true,
-          message: "Cached summary (data unchanged today)"
+          fallback: Boolean(parsedCache.fallback),
+          ...(parsedCache.fallback
+            ? {
+                notice:
+                  "Showing a recent simplified summary while the AI response recovers.",
+              }
+            : {}),
+          message: parsedCache.fallback
+            ? "Cached fallback summary"
+            : "Cached summary (data unchanged today)"
         });
       }
     } catch (cacheError) {
@@ -691,7 +774,7 @@ const generateAISummary = async (req, res) => {
 
     // Clean up old cache entries for this user today (optional)
     try {
-      const pattern = `ai_summary:${userId}:${today}:*`;
+      const pattern = `ai_summary:v${AI_SUMMARY_CACHE_VERSION}:${userId}:${today}:*`;
       let cursor = '0';
       let keysToDelete = [];
       
@@ -802,12 +885,25 @@ CRITICAL: Use ₹ symbol and Indian number formatting. Be SPECIFIC to their data
         logGeminiError("AI Summary quota fallback", error);
 
         const generatedAt = new Date().toISOString();
+        const fallbackSummary = buildFallbackAISummary(financialData);
+
+        try {
+          await cacheAISummaryPayload({
+            cacheKey,
+            aiSummary: fallbackSummary,
+            generatedAt,
+            ttlSeconds: FALLBACK_CACHE_TTL,
+            fallback: true,
+          });
+        } catch (cacheError) {
+          console.error("Failed to cache fallback AI summary:", cacheError);
+        }
 
         return res.json({
           success: true,
           data: financialData,
           overview,
-          aiSummary: buildFallbackAISummary(financialData),
+          aiSummary: fallbackSummary,
           generatedAt,
           cached: false,
           fallback: true,
@@ -823,9 +919,31 @@ CRITICAL: Use ₹ symbol and Indian number formatting. Be SPECIFIC to their data
 
     if (!rawText) {
       console.error("No response text from Gemini");
-      return res.status(500).json({ 
-        message: "No response from AI", 
-        success: false 
+      const generatedAt = new Date().toISOString();
+      const fallbackSummary = buildFallbackAISummary(financialData);
+
+      try {
+        await cacheAISummaryPayload({
+          cacheKey,
+          aiSummary: fallbackSummary,
+          generatedAt,
+          ttlSeconds: FALLBACK_CACHE_TTL,
+          fallback: true,
+        });
+      } catch (cacheError) {
+        console.error("Failed to cache empty-response fallback AI summary:", cacheError);
+      }
+
+      return res.json({
+        success: true,
+        data: financialData,
+        overview,
+        aiSummary: fallbackSummary,
+        generatedAt,
+        cached: false,
+        fallback: true,
+        notice: "The AI returned an empty response, so a simplified summary was generated from your data.",
+        message: "Generated fallback AI summary"
       });
     }
 
@@ -847,20 +965,21 @@ CRITICAL: Use ₹ symbol and Indian number formatting. Be SPECIFIC to their data
     const generatedAt = new Date().toISOString();
 
     // Save to Redis cache with TTL
-    if (!usedFallbackSummary) {
-      try {
-        const cacheData = {
-          aiSummary: parsed,
-          generatedAt
-        };
-      
-        await redis.setEx(cacheKey, CACHE_TTL, JSON.stringify(cacheData));
-        console.log(`✅ Cached AI summary in Redis (TTL: ${CACHE_TTL}s = 24h)`);
-      } catch (cacheError) {
-        console.error("Failed to cache in Redis:", cacheError);
-      }
-    } else {
-      console.log("Skipping cache because fallback summary was used");
+    try {
+      await cacheAISummaryPayload({
+        cacheKey,
+        aiSummary: parsed,
+        generatedAt,
+        ttlSeconds: usedFallbackSummary ? FALLBACK_CACHE_TTL : CACHE_TTL,
+        fallback: usedFallbackSummary,
+      });
+      console.log(
+        `✅ Cached AI summary in Redis (TTL: ${
+          usedFallbackSummary ? FALLBACK_CACHE_TTL : CACHE_TTL
+        }s)`
+      );
+    } catch (cacheError) {
+      console.error("Failed to cache in Redis:", cacheError);
     }
 
     res.json({
@@ -871,6 +990,12 @@ CRITICAL: Use ₹ symbol and Indian number formatting. Be SPECIFIC to their data
       generatedAt,
       cached: false,
       fallback: usedFallbackSummary,
+      ...(usedFallbackSummary
+        ? {
+            notice:
+              "The AI response was unavailable, so a simplified summary was generated from your data.",
+          }
+        : {}),
       message: usedFallbackSummary
         ? "Generated fallback AI summary"
         : "Generated new AI summary"

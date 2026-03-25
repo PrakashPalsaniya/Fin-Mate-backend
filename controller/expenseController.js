@@ -1,4 +1,5 @@
 const Expense = require("../models/Expense.js");
+const { invalidateDashboardCache } = require("../services/dashboardCacheService.js");
 const xlsx = require("xlsx");
 const {
     createTransaction,
@@ -75,6 +76,12 @@ exports.deleteExpense = async (req, res) => {
 
         if (!deletedExpense) {
             return res.status(404).json({ message: "Expense not found" });
+        }
+
+        try {
+            await invalidateDashboardCache({ userId: req.user.id });
+        } catch (cacheError) {
+            console.error("Failed to invalidate dashboard cache after expense delete:", cacheError.message);
         }
 
         res.json({ message: "expense deleted successfully" })

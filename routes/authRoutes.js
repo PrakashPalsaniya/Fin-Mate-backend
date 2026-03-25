@@ -1,6 +1,10 @@
 const express = require("express")
 const passport = require("../config/passport.js")
 const { protect } = require("../middlewares/authMiddleware.js")
+const {
+    otpSendRateLimiter,
+    otpVerifyRateLimiter,
+} = require("../middlewares/rateLimitMiddleware.js")
 const upload = require("../middlewares/uploadMiddleware.js");
 
 const {
@@ -17,8 +21,8 @@ const router = express.Router();
 const loginFailureRedirect = `${process.env.CLIENT_URL || process.env.FRONTEND_URL || "http://localhost:5173"}/login`;
 
 router.post("/register", registerUser);
-router.post("/send-otp", sendOTP);
-router.post("/verify-otp", verifyOTPAndRegister);
+router.post("/send-otp", otpSendRateLimiter, sendOTP);
+router.post("/verify-otp", otpVerifyRateLimiter, verifyOTPAndRegister);
 router.post("/login", loginUser);
 router.get("/getUser", protect, getUserInfo);
 

@@ -5,6 +5,7 @@ const {
     getBudgetSnapshot,
     updateBudget,
 } = require("../services/budgetService.js");
+const { invalidateDashboardCache } = require("../services/dashboardCacheService.js");
 const { normalizeUserSettings } = require("../utils/userSettings.js");
 
 const getUserTimeZone = (req) =>
@@ -39,6 +40,12 @@ exports.addBudget = async (req, res) => {
             timeZone: getUserTimeZone(req),
         });
 
+        try {
+            await invalidateDashboardCache({ userId: req.user.id });
+        } catch (cacheError) {
+            console.error("Failed to invalidate dashboard cache after budget create:", cacheError.message);
+        }
+
         return res.status(201).json({
             message: "Budget created successfully",
             budget,
@@ -64,6 +71,12 @@ exports.editBudget = async (req, res) => {
             timeZone: getUserTimeZone(req),
         });
 
+        try {
+            await invalidateDashboardCache({ userId: req.user.id });
+        } catch (cacheError) {
+            console.error("Failed to invalidate dashboard cache after budget update:", cacheError.message);
+        }
+
         return res.status(200).json({
             message: "Budget updated successfully",
             budget,
@@ -86,6 +99,12 @@ exports.removeBudget = async (req, res) => {
             budgetId: req.params.id,
             userId: req.user.id,
         });
+
+        try {
+            await invalidateDashboardCache({ userId: req.user.id });
+        } catch (cacheError) {
+            console.error("Failed to invalidate dashboard cache after budget delete:", cacheError.message);
+        }
 
         return res.status(200).json({
             message: "Budget deleted successfully",

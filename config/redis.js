@@ -179,6 +179,50 @@ const redisWrapper = {
         }
     },
 
+    // Increment numeric value
+    incr: async (key) => {
+        if (redisConnected) {
+            return await client.incr(key);
+        } else {
+            const item = inMemoryStorage.get(key);
+
+            if (item && item.expiresAt <= Date.now()) {
+                inMemoryStorage.delete(key);
+            }
+
+            const currentValue = Number(inMemoryStorage.get(key)?.value || 0);
+            const nextValue = currentValue + 1;
+            const expiresAt = inMemoryStorage.get(key)?.expiresAt ?? Infinity;
+
+            inMemoryStorage.set(key, {
+                value: String(nextValue),
+                expiresAt,
+            });
+
+            return nextValue;
+        }
+    },
+
+    // Set expiration on an existing key
+    expire: async (key, ttl) => {
+        if (redisConnected) {
+            return await client.expire(key, ttl);
+        } else {
+            const item = inMemoryStorage.get(key);
+
+            if (!item) {
+                return 0;
+            }
+
+            inMemoryStorage.set(key, {
+                ...item,
+                expiresAt: Date.now() + (ttl * 1000),
+            });
+
+            return 1;
+        }
+    },
+
     // Scan for keys matching pattern
     scan: async (cursor, matchOption, pattern, countOption, count) => {
         if (redisConnected) {

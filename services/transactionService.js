@@ -1,5 +1,6 @@
 const Expense = require("../models/Expense.js");
 const Income = require("../models/Income.js");
+const { invalidateDashboardCache } = require("./dashboardCacheService.js");
 const { normalizeTransactionPayload } = require("../utils/transactionPayload.js");
 
 const TRANSACTION_MODELS = {
@@ -44,10 +45,18 @@ const createTransaction = async ({ transactionType, userId, payload }) => {
     const Model = getTransactionModel(transactionType);
     const value = normalizeTransactionInput(payload, transactionType);
 
-    return Model.create({
+    const createdTransaction = await Model.create({
         userId,
         ...value,
     });
+
+    try {
+        await invalidateDashboardCache({ userId });
+    } catch (error) {
+        console.error("Failed to invalidate dashboard cache after create:", error.message);
+    }
+
+    return createdTransaction;
 };
 
 const updateTransaction = async ({ transactionType, transactionId, userId, payload }) => {
@@ -77,6 +86,12 @@ const updateTransaction = async ({ transactionType, transactionId, userId, paylo
     if (!updatedTransaction) {
         const label = transactionType === "income" ? "Income" : "Expense";
         throw new TransactionServiceError(`${label} not found`, 404);
+    }
+
+    try {
+        await invalidateDashboardCache({ userId });
+    } catch (error) {
+        console.error("Failed to invalidate dashboard cache after update:", error.message);
     }
 
     return updatedTransaction;

@@ -1,6 +1,10 @@
 const Income = require("../models/Income.js")
 const Expense = require("../models/Expense.js")
 const { getBudgetSnapshot } = require("../services/budgetService.js")
+const {
+    getCachedDashboardResponse,
+    setCachedDashboardResponse,
+} = require("../services/dashboardCacheService.js")
 const { normalizeUserSettings } = require("../utils/userSettings.js")
 
 const { Types } = require("mongoose")
@@ -15,6 +19,20 @@ exports.getDashboardData = async (req, res) => {
         }
 
         const userObjectId = new Types.ObjectId(String(userId));
+        const timeZone = normalizeUserSettings(req.user?.settings || {}).timezone;
+
+        try {
+            const { data: cachedDashboard } = await getCachedDashboardResponse({
+                userId,
+                timeZone,
+            });
+
+            if (cachedDashboard) {
+                return res.json(cachedDashboard);
+            }
+        } catch (cacheError) {
+            console.error("Failed to read dashboard cache:", cacheError.message);
+        }
 
         // fetch total income and expense
         const totalIncome = await Income.aggregate([
@@ -101,7 +119,7 @@ exports.getDashboardData = async (req, res) => {
         try {
             budgetSnapshot = await getBudgetSnapshot({
                 userId,
-                timeZone: normalizeUserSettings(req.user?.settings || {}).timezone,
+                timeZone,
                 limit: 3,
             });
         } catch (budgetError) {
@@ -140,6 +158,16 @@ exports.getDashboardData = async (req, res) => {
                 budgets: budgetSnapshot.budgets,
             },
         };
+
+        try {
+            await setCachedDashboardResponse({
+                userId,
+                timeZone,
+                data: responseData,
+            });
+        } catch (cacheError) {
+            console.error("Failed to write dashboard cache:", cacheError.message);
+        }
 
         res.json(responseData);
 
