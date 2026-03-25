@@ -77,6 +77,27 @@ const buildLinkSuccessMessage = ({ fullName }) =>
         "Use /summary whenever you want a quick recap.",
     ].join("\n");
 
+const buildLinkedStartMessage = ({ account, botUsername } = {}) =>
+    [
+        account
+            ? `FinMate is already linked to ${account.displayName}${account.username ? ` (@${account.username})` : ""}.`
+            : "FinMate Telegram bot is ready.",
+        "",
+        "You can now send messages like:",
+        "- Spent 420 on groceries today",
+        "- Received 1200 freelance payment",
+        "",
+        "Useful commands:",
+        "- /summary",
+        "- /summary daily",
+        "- /summary weekly",
+        "- /summary monthly",
+        "- /status",
+        botUsername ? `- Open the bot directly: https://t.me/${botUsername}` : "",
+    ]
+        .filter(Boolean)
+        .join("\n");
+
 const buildTransactionPreviewMessage = (draft = {}) =>
     [
         "I parsed this transaction:",
@@ -160,6 +181,7 @@ module.exports = {
     buildConfirmTransactionKeyboard,
     buildExpiredIntentMessage,
     buildHelpMessage,
+    buildLinkedStartMessage,
     buildLinkRequiredMessage,
     buildLinkSuccessMessage,
     buildStatusMessage,

@@ -35,6 +35,7 @@ const {
     buildConfirmTransactionKeyboard,
     buildExpiredIntentMessage,
     buildHelpMessage,
+    buildLinkedStartMessage,
     buildLinkRequiredMessage,
     buildLinkSuccessMessage,
     buildStatusMessage,
@@ -135,10 +136,22 @@ const getBotDeepLink = () => {
     return botConfig.username ? `https://t.me/${botConfig.username}` : null;
 };
 
-const handleStartCommand = async (message, args, updateId) => {
+const handleStartCommand = async (message, args, user, updateId) => {
     const chatId = String(message.chat?.id || "");
 
     if (!args[0]) {
+        if (user) {
+            return sendChatMessage(
+                chatId,
+                buildLinkedStartMessage({
+                    account: buildTelegramStatus(user).telegram.account,
+                    botUsername: getTelegramPublicConfig().username,
+                }),
+                undefined,
+                updateId
+            );
+        }
+
         return sendChatMessage(
             chatId,
             buildLinkRequiredMessage({
@@ -215,7 +228,7 @@ const handleTelegramCommand = async (message, user, updateId) => {
     const { command, args } = parseCommand(message.text);
 
     if (command === "start") {
-        return handleStartCommand(message, args, updateId);
+        return handleStartCommand(message, args, user, updateId);
     }
 
     if (!user) {
