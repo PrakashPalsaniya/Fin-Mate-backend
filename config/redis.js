@@ -1,75 +1,121 @@
-const { createClient } = require('redis');
+const { createClient } = require("redis");
 
 // In-memory fallback storage when Redis is not available
-let inMemoryStorage = new Map();
+const inMemoryStorage = new Map();
 
-const client = createClient({
-    username: 'default',
-    password: 'Od4tpLX0luCkQFZ45AF8the0haNR9cHz',
-    socket: {
-        host: 'redis-16393.crce217.ap-south-1-1.ec2.redns.redis-cloud.com',
-        port: 16393
+const normalizeRedisUrl = (rawUrl) => {
+    if (!rawUrl) {
+        return "";
     }
-});
+
+    const trimmedUrl = String(rawUrl).trim();
+
+    // Be forgiving if the env value was pasted as `REDIS_URL=redis://...`
+    if (trimmedUrl.startsWith("REDIS_URL=")) {
+        return trimmedUrl.slice("REDIS_URL=".length).trim();
+    }
+
+    return trimmedUrl;
+};
+
+const redisUrl = normalizeRedisUrl(process.env.REDIS_URL);
+const redisPort = Number(process.env.REDIS_PORT || 6379);
+let client;
+
+try {
+    client = createClient(
+        redisUrl
+            ? { url: redisUrl }
+            : {
+                username: process.env.REDIS_USERNAME || undefined,
+                password: process.env.REDIS_PASSWORD || undefined,
+                socket: {
+                    host: process.env.REDIS_HOST || "127.0.0.1",
+                    port: redisPort,
+                },
+            }
+    );
+} catch (error) {
+    console.error("Invalid Redis configuration, falling back to in-memory storage:", error.message);
+    client = createClient({
+        socket: {
+            host: "127.0.0.1",
+            port: 6379,
+        },
+    });
+}
 
 let redisConnected = false;
+let connectPromise = null;
 
-client.on('error', (err) => {
-    console.error('❌ Redis Client Error:', err);
+client.on("error", (err) => {
+    console.error("Redis Client Error:", err.message);
     redisConnected = false;
 });
 
-client.on('connect', () => {
-    console.log('✅ Redis Connected');
+client.on("connect", () => {
+    console.log("Redis Connected");
     redisConnected = true;
 });
 
-client.on('ready', () => {
-    console.log('✅ Redis Client Ready');
+client.on("ready", () => {
+    console.log("Redis Client Ready");
     redisConnected = true;
 });
 
-client.on('end', () => {
-    console.log('❌ Redis Connection Ended');
+client.on("end", () => {
+    console.log("Redis Connection Ended");
     redisConnected = false;
 });
-
-// Connect to Redis
-(async () => {
-    try {
-        await client.connect();
-    } catch (err) {
-        console.error('Failed to connect to Redis, using in-memory storage:', err.message);
-        redisConnected = false;
-    }
-})();
 
 // Wrapper functions with fallback to in-memory storage
 const redisWrapper = {
+    connect: async () => {
+        if (redisConnected || client.isOpen) {
+            return;
+        }
+
+        if (connectPromise) {
+            return connectPromise;
+        }
+
+        connectPromise = client
+            .connect()
+            .catch((err) => {
+                console.error("Failed to connect to Redis, using in-memory storage:", err.message);
+                redisConnected = false;
+            })
+            .finally(() => {
+                connectPromise = null;
+            });
+
+        return connectPromise;
+    },
+
     // Set with expiration
     setEx: async (key, ttl, value) => {
         if (redisConnected) {
             return await client.setEx(key, ttl, value);
         } else {
             inMemoryStorage.set(key, { value, expiresAt: Date.now() + (ttl * 1000) });
-            return 'OK';
+            return "OK";
         }
     },
 
     // Alternative: set with EX flag (same as setEx)
     set: async (key, value, mode, duration) => {
         if (redisConnected) {
-            if (mode === 'EX') {
+            if (mode === "EX") {
                 return await client.setEx(key, duration, value);
             }
             return await client.set(key, value);
         } else {
-            if (mode === 'EX') {
+            if (mode === "EX") {
                 inMemoryStorage.set(key, { value, expiresAt: Date.now() + (duration * 1000) });
             } else {
                 inMemoryStorage.set(key, { value, expiresAt: Infinity });
             }
-            return 'OK';
+            return "OK";
         }
     },
 
@@ -106,7 +152,7 @@ const redisWrapper = {
         if (redisConnected) {
             const result = await client.scan(cursor, {
                 MATCH: pattern,
-                COUNT: count
+                COUNT: count,
             });
             return [result.cursor.toString(), result.keys];
         } else {
@@ -119,7 +165,7 @@ const redisWrapper = {
                     keys.push(key);
                 }
             }
-            return ['0', keys]; // Always return cursor '0' for in-memory
+            return ["0", keys]; // Always return cursor '0' for in-memory
         }
     },
 
@@ -138,7 +184,7 @@ const redisWrapper = {
 
     // Quit connection
     quit: async () => {
-        if (redisConnected) {
+        if (client.isOpen) {
             return await client.quit();
         }
     },

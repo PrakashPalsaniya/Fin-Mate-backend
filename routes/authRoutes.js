@@ -8,11 +8,13 @@ const {
     loginUser,
     getUserInfo,
     googleAuthCallback,
+    exchangeGoogleCode,
     sendOTP,
     verifyOTPAndRegister,
 } = require("../controller/authController.js");
 
 const router = express.Router();
+const loginFailureRedirect = `${process.env.CLIENT_URL || process.env.FRONTEND_URL || "http://localhost:5173"}/login`;
 
 router.post("/register", registerUser);
 router.post("/send-otp", sendOTP);
@@ -22,7 +24,8 @@ router.get("/getUser", protect, getUserInfo);
 
 // Google OAuth routes
 router.get("/google", passport.authenticate("google", { scope: ["profile", "email"] }));
-router.get("/google/callback", passport.authenticate("google", { failureRedirect: "/login" }), googleAuthCallback);
+router.get("/google/callback", passport.authenticate("google", { failureRedirect: loginFailureRedirect }), googleAuthCallback);
+router.get("/exchange-google-code", exchangeGoogleCode);
 router.post("/upload-image", upload.single("image"), (req, res)=>{
     if (!req.file) {
         return res.status(409).json({message: "no file uploaded"})

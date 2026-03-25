@@ -1,146 +1,188 @@
-# FinMate Backend – MERN Expense Tracker
+# FinMate Backend - MERN Expense Tracker
 
-This is the backend API for FinMate, a secure and feature-rich expense tracker built with Node.js, Express, and MongoDB. It handles user authentication, income and expense management, dashboard analytics, file uploads, and Excel report exports.
-
----
+This is the backend API for FinMate, an expense tracker built with Node.js, Express, MongoDB, Redis-backed OTP storage, Google OAuth, and AI-powered finance features.
 
 ## Features
 
-- **JWT Authentication:** Secure user registration and login.
-- **Income & Expense Management:** Add, view, and delete income/expense records.
-- **Dashboard Analytics:** Get total balance, income, expenses, and recent transactions.
-- **Excel Export:** Download income and expense data as Excel files.
-- **Profile Image Upload:** Upload and store user profile images.
-- **RESTful API:** Well-structured endpoints for all operations.
-- **Middleware:** Authentication and file upload middleware for security and convenience.
-
----
+- JWT authentication
+- OTP-based sign-up flow
+- Google sign-in
+- Income and expense management
+- Dashboard analytics
+- AI summary generation
+- Finance chat assistant
+- Telegram bot quick capture
+- Scheduled daily/weekly/monthly summary delivery
+- Profile image uploads
+- Excel export for income and expense data
 
 ## Project Structure
 
-```
+```text
 backend/
-│
-├── config/
-│   └── db.js
-├── controller/
-│   ├── authController.js
-│   ├── dashboardController.js
-│   ├── expenseController.js
-│   └── incomeController.js
-├── middlewares/
-│   ├── authMiddleware.js
-│   └── uploadMiddleware.js
-├── models/
-│   ├── Expense.js
-│   ├── Income.js
-│   └── User.js
-├── routes/
-│   ├── authRoutes.js
-│   ├── dashboardRoutes.js
-│   ├── expenseRoutes.js
-│   └── incomeRoutes.js
-├── uploads/
-│   └── [profile images]
-├── .env
-├── .env.example
-├── package.json
-├── server.js
-└── readme.md
+|-- config/
+|-- controller/
+|-- middlewares/
+|-- models/
+|-- routes/
+|-- uploads/
+|-- utils/
+|-- .env
+|-- .env.example
+|-- package.json
+`-- server.js
 ```
-
----
 
 ## Getting Started
 
 ### Prerequisites
 
-- Node.js & npm
-- MongoDB database (local or [MongoDB Atlas](https://www.mongodb.com/atlas/database))
+- Node.js and npm
+- MongoDB local instance or MongoDB Atlas
+- Redis local instance or hosted Redis URL
+- Brevo API key for OTP email delivery
 
 ### Installation
 
-1. **Clone the repository:**
-   ```sh
-   git clone <repo-url>
-   cd backend
-   ```
+1. Install dependencies:
 
-2. **Install dependencies:**
-   ```sh
-   npm install
-   ```
+```sh
+npm install
+```
 
-3. **Configure environment variables:**
-   - Copy `.env.example` to `.env` and fill in your values:
-     ```
-     MONGO_URI=your_mongodb_connection_string
-     JWT_SECRET=your_jwt_secret
-     PORT=8000
-     CLIENT_URL=http://localhost:5173
-     ```
+2. Copy the env file:
 
-4. **Start the server:**
-   ```sh
-   npm run dev
-   ```
-   The backend will run on `http://localhost:8000` by default.
+```sh
+copy .env.example .env
+```
 
----
+3. Update `.env` with your values:
 
-## API Endpoints
+```env
+MONGO_URI=mongodb://localhost:27017/expense-tracker
+PORT=5000
+CLIENT_URL=http://localhost:3000
+JWT_SECRET=your-jwt-secret
+SESSION_SECRET=your-session-secret
+GOOGLE_CLIENT_ID=your-google-client-id
+GOOGLE_CLIENT_SECRET=your-google-client-secret
+GOOGLE_CALLBACK_URL=http://localhost:5000/api/v1/auth/google/callback
+BREVO_API_KEY=your-brevo-api-key
+REDIS_URL=redis://localhost:6379
+GEMINI_API_KEY=your-gemini-api-key
+GEMINI_MODEL=gemini-2.5-flash
+```
+
+4. Start the server:
+
+```sh
+npm run dev
+```
+
+The backend runs on `http://localhost:5000`.
+
+## API Routes
 
 ### Auth
-- `POST /api/auth/register` – Register a new user
-- `POST /api/auth/login` – Login and receive JWT
+
+- `POST /api/v1/auth/register`
+- `POST /api/v1/auth/send-otp`
+- `POST /api/v1/auth/verify-otp`
+- `POST /api/v1/auth/login`
+- `GET /api/v1/auth/getUser`
+- `GET /api/v1/auth/google`
+- `GET /api/v1/auth/google/callback`
+- `GET /api/v1/auth/exchange-google-code`
+- `POST /api/v1/auth/upload-image`
 
 ### Dashboard
-- `GET /api/dashboard/overview` – Get balance, income, expenses, and recent transactions
+
+- `GET /api/v1/dashboard`
 
 ### Income
-- `POST /api/income` – Add income
-- `GET /api/income` – Get all income
-- `DELETE /api/income/:id` – Delete income
-- `GET /api/income/export` – Export income as Excel
+
+- `POST /api/v1/income/add`
+- `GET /api/v1/income/get`
+- `GET /api/v1/income/downloadexcel`
+- `DELETE /api/v1/income/:id`
 
 ### Expense
-- `POST /api/expense` – Add expense
-- `GET /api/expense` – Get all expenses
-- `DELETE /api/expense/:id` – Delete expense
-- `GET /api/expense/export` – Export expenses as Excel
 
-### Profile Image Upload
-- `POST /api/auth/upload` – Upload profile image
+- `POST /api/v1/expense/add`
+- `GET /api/v1/expense/get`
+- `GET /api/v1/expense/downloadexcel`
+- `DELETE /api/v1/expense/:id`
 
----
+### AI Summary
+
+- `GET /api/v1/ai-summary`
+
+### Chat
+
+- `POST /api/v1/chat`
+
+### Telegram
+
+- `GET /api/v1/telegram/status`
+- `POST /api/v1/telegram/link/start`
+- `DELETE /api/v1/telegram/link`
+- `POST /api/v1/telegram/webhook`
+
+### Summary Delivery
+
+- `GET /api/v1/summary-delivery/history`
+- `POST /api/v1/summary-delivery/send`
 
 ## Environment Variables
 
-See `.env.example` for required variables:
-```
-MONGO_URI=your_mongodb_connection_string
-JWT_SECRET=your_jwt_secret
-PORT=5000
-CLIENT_URL=http://localhost:5173
-SESSION_SECRET=your_session_secret
-GOOGLE_CLIENT_ID=your_google_client_id
-GOOGLE_CLIENT_SECRET=your_google_client_secret
-GOOGLE_CALLBACK_URL=http://localhost:5000/api/v1/auth/google/callback
-```
+The current backend code expects these main variables:
 
----
+- `MONGO_URI`
+- `PORT`
+- `CLIENT_URL`
+- `JWT_SECRET`
+- `SESSION_SECRET`
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
+- `GOOGLE_CALLBACK_URL`
+- `BREVO_API_KEY`
+- `BREVO_SENDER_NAME`
+- `BREVO_SENDER_EMAIL`
+- `REDIS_URL` or `REDIS_HOST` / `REDIS_PORT`
+- `GEMINI_API_KEY`
+- `GEMINI_MODEL`
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_BOT_USERNAME`
+- `TELEGRAM_WEBHOOK_URL`
+- `TELEGRAM_WEBHOOK_SECRET`
+- `SUMMARY_SCHEDULER_ENABLED`
+- `SUMMARY_SCHEDULER_INTERVAL_MS`
 
-## License
+## Telegram Bot Flow
 
-MIT
+1. User opens Settings in the app and generates a one-time link code.
+2. The app builds a Telegram deep link like `https://t.me/<bot_username>?start=<code>`.
+3. The Telegram bot consumes that code through `/start <code>` and links the chat to the logged-in user.
+4. Linked users can send plain text transactions such as `Spent 420 on groceries today`.
+5. The backend parses the text, replies with a confirmation prompt, and saves only after the user taps `Confirm`.
+6. Users can also request `/summary daily`, `/summary weekly`, or `/summary monthly`.
 
----
+## Telegram Setup
 
-## Acknowledgements
+1. Add the Telegram variables to `backend/.env`.
+2. Expose the backend to a public HTTPS URL.
+3. Run `npm run telegram:webhook:set`.
+4. Verify with `npm run telegram:webhook:info`.
 
-- [Express](https://expressjs.com/)
-- [MongoDB](https://www.mongodb.com/)
-- [Mongoose](https://mongoosejs.com/)
-- [JWT](https://jwt.io/)
-- [Multer](https://github.com/expressjs/multer)
--
+## Scheduled Summaries
+
+- The backend runs a lightweight scheduler loop and checks due users every minute by default.
+- Daily, weekly, and monthly timing is based on each user's stored timezone and summary settings.
+- Delivery uses the linked Telegram chat when Telegram delivery is enabled, and email when email delivery is enabled.
+- Duplicate scheduled sends are prevented with a persistent delivery log.
+
+## Notes
+
+- OTP storage falls back to in-memory storage if Redis is not reachable.
+- The frontend dev server is configured for `http://localhost:3000`.
+- `CLIENT_URL` should match the frontend origin to avoid CORS issues.

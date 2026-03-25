@@ -7,6 +7,7 @@ apiInstance.setApiKey(
 );
 
 const client = require('../config/redis');
+const OTP_TTL_SECONDS = Number(process.env.OTP_TTL_SECONDS || 300);
 
 // Cleanup expired OTPs (optional - Redis handles expiration automatically)
 const cleanupExpiredOTPs = async () => {
@@ -23,8 +24,7 @@ const generateOTP = () => {
 const storeOTP = async (email, otp) => {
     try {
         const key = `otp:${email}`;
-        const expiresIn = 300; // 5 minutes in seconds
-        await client.setEx(key, expiresIn, otp);
+        await client.setEx(key, OTP_TTL_SECONDS, otp);
         console.log(`OTP stored for ${email} (${client.isConnected() ? 'Redis' : 'In-memory'})`);
     } catch (error) {
         console.error('Error storing OTP:', error);
@@ -62,7 +62,7 @@ const sendOTPEmail = async (email, otp) => {
       <h2>OTP Verification</h2>
       <p>Your One-Time Password (OTP) is:</p>
       <h3 style="color:#007BFF">${otp}</h3>
-      <p>This code is valid for 10 minutes.</p>
+      <p>This code is valid for ${Math.max(1, Math.round(OTP_TTL_SECONDS / 60))} minutes.</p>
     </div>
   `;
   sendSmtpEmail.sender = { name: "FinMate", email: "pkjat6376060840@gmail.com" };

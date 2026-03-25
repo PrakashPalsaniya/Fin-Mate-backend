@@ -1,46 +1,55 @@
 const Expense = require("../models/Expense.js");
 const xlsx = require("xlsx");
+const {
+    createTransaction,
+    TransactionServiceError,
+    updateTransaction,
+} = require("../services/transactionService.js");
+
+const buildWorkbookBuffer = (sheetName, data) => {
+    const wb = xlsx.utils.book_new();
+    const ws = xlsx.utils.json_to_sheet(data);
+
+    xlsx.utils.book_append_sheet(wb, ws, sheetName);
+
+    return xlsx.write(wb, { bookType: "xlsx", type: "buffer" });
+};
 
 //Expense Source
 exports.addExpense = async (req, res) => {
     const userId = req.user.id;
 
     try {
-        const { title, category, amount, date } = req.body;
-
-        // validation: check for missing fields
-        if (!title || !category || !amount || !date) {
-            return res.status(400).json({ message: "All fields are required" });
+        const newExpense = await createTransaction({
+            transactionType: "expense",
+            userId,
+            payload: req.body,
+        });
+        res.status(200).json(newExpense);
+    } catch (error) {
+        if (error instanceof TransactionServiceError) {
+            return res.status(error.status).json({ message: error.message });
         }
 
-        // Map category to icon
-        const iconMap = {
-            rent: "LuHome",
-            entertainment: "LuGamepad2",
-            food: "LuUtensils",
-            transport: "LuCar",
-            utilities: "LuZap",
-            healthcare: "LuHeart",
-            education: "LuGraduationCap",
-            shopping: "LuShoppingBag",
-            others: "LuUtensils"
-        };
-        const icon = iconMap[category.toLowerCase()] || "LuUtensils";
-
-        const newExpense = new Expense({
-            userId,
-            title,
-            category,
-            amount,
-            date: new Date(date),
-            icon
-        })
-
-        await newExpense.save();
-        res.status(200).json(newExpense);
-
-    } catch (error) {
         res.status(500).json({ message: "server error" })
+    }
+}
+
+exports.updateExpense = async (req, res) => {
+    try {
+        const updatedExpense = await updateTransaction({
+            transactionType: "expense",
+            transactionId: req.params.id,
+            userId: req.user.id,
+            payload: req.body,
+        });
+        return res.status(200).json(updatedExpense);
+    } catch (error) {
+        if (error instanceof TransactionServiceError) {
+            return res.status(error.status).json({ message: error.message });
+        }
+
+        return res.status(500).json({ message: "server error", error: error.message });
     }
 }
 
@@ -59,8 +68,16 @@ exports.getAllExpense = async (req, res) => {
 // DeExpense Source
 exports.deleteExpense = async (req, res) => {
     try {
-        await Expense.findByIdAndDelete(req.params.id)
-        res.json({ message: "income deleted successfully" })
+        const deletedExpense = await Expense.findOneAndDelete({
+            _id: req.params.id,
+            userId: req.user.id,
+        });
+
+        if (!deletedExpense) {
+            return res.status(404).json({ message: "Expense not found" });
+        }
+
+        res.json({ message: "expense deleted successfully" })
     } catch (err) {
         res.status(500).json({ message: "server error", error: err.message })
     }
@@ -81,11 +98,11 @@ exports.downloadExpenseExcel = async (req, res) => {
             Date: item.date,
         }))
 
-        const wb = xlsx.utils.book_new();
-        const ws = xlsx.utils.json_to_sheet(data);
-        xlsx.utils.book_append_sheet(wb, ws, "Expense")
-        xlsx.writeFile(wb, 'expense_details.xlsx')
-        res.download('expense_details.xlsx')
+        const buffer = buildWorkbookBuffer("Expense", data);
+
+        res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        res.setHeader("Content-Disposition", 'attachment; filename="expense_details.xlsx"');
+        res.send(buffer);
 
     } catch (err) {
         res.status(500).json({ message: "server error", error: err.message })

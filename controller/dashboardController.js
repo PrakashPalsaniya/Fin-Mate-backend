@@ -1,38 +1,31 @@
 const Income = require("../models/Income.js")
 const Expense = require("../models/Expense.js")
+const { getBudgetSnapshot } = require("../services/budgetService.js")
+const { normalizeUserSettings } = require("../utils/userSettings.js")
 
-const { isValidObjectId, Types } = require("mongoose")
+const { Types } = require("mongoose")
  
 // Dashboard Data
 exports.getDashboardData = async (req, res) => {
     try {
-        console.log('Dashboard request received');
-        console.log('req.user:', req.user);
-
         const userId = req.user.id
-        console.log('userId:', userId);
 
         if (!userId) {
             return res.status(400).json({ message: "User ID not found" });
         }
 
         const userObjectId = new Types.ObjectId(String(userId));
-        console.log('userObjectId:', userObjectId);
 
         // fetch total income and expense
-        console.log('Fetching total income...');
         const totalIncome = await Income.aggregate([
             { $match: { userId: userObjectId } },
             { $group: { _id: null, total: { $sum: "$amount" } } }
         ])
-        console.log('Total Income result:', totalIncome);
 
-        console.log('Fetching total expense...');
         const totalExpense = await Expense.aggregate([
             { $match: { userId: userObjectId } },
             { $group: { _id: null, total: { $sum: "$amount" } } }
         ])
-        console.log('Total Expense result:', totalExpense);
 
         // get income transaction in last 60 days
         const last60DaysIncomeTransactions = await Income.find({
@@ -88,6 +81,33 @@ exports.getDashboardData = async (req, res) => {
             { $sort: { total: -1 } }
         ]);
 
+        let budgetSnapshot = {
+            summary: {
+                month: null,
+                monthLabel: "Current month",
+                activeBudgets: 0,
+                totalBudgeted: 0,
+                totalSpent: 0,
+                totalRemaining: 0,
+                totalOverspent: 0,
+                overBudgetCount: 0,
+                closeToLimitCount: 0,
+                totalSpentThisMonth: 0,
+                unbudgetedSpend: 0,
+            },
+            budgets: [],
+        };
+
+        try {
+            budgetSnapshot = await getBudgetSnapshot({
+                userId,
+                timeZone: normalizeUserSettings(req.user?.settings || {}).timezone,
+                limit: 3,
+            });
+        } catch (budgetError) {
+            console.error("Failed to load dashboard budget snapshot:", budgetError.message);
+        }
+
         // Convert aggregations to object format for frontend
         const expenseCategoriesData = expenseCategories.reduce((acc, cat) => {
             acc[cat._id] = cat.total;
@@ -115,9 +135,12 @@ exports.getDashboardData = async (req, res) => {
             recentTransactions: lastTransactions,
             expenseCategories: expenseCategoriesData,
             incomeCategories: incomeCategoriesData,
+            budgetOverview: {
+                ...budgetSnapshot.summary,
+                budgets: budgetSnapshot.budgets,
+            },
         };
 
-        console.log('Final response data:', responseData);
         res.json(responseData);
 
     } catch (err) {

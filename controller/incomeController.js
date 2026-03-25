@@ -1,42 +1,55 @@
 const Income = require("../models/Income.js");
 const xlsx = require("xlsx");
+const {
+    createTransaction,
+    TransactionServiceError,
+    updateTransaction,
+} = require("../services/transactionService.js");
+
+const buildWorkbookBuffer = (sheetName, data) => {
+    const wb = xlsx.utils.book_new();
+    const ws = xlsx.utils.json_to_sheet(data);
+
+    xlsx.utils.book_append_sheet(wb, ws, sheetName);
+
+    return xlsx.write(wb, { bookType: "xlsx", type: "buffer" });
+};
 
 // Add Income Source
 exports.addIncome = async (req, res) => {
     const userId = req.user.id;
 
     try {
-        const { title, category, amount, date } = req.body;
-
-        // validation: check for missing fields
-        if (!title || !category || !amount || !date) {
-            return res.status(400).json({ message: "All fields are required" });
+        const newIncome = await createTransaction({
+            transactionType: "income",
+            userId,
+            payload: req.body,
+        });
+        res.status(200).json(newIncome);
+    } catch (error) {
+        if (error instanceof TransactionServiceError) {
+            return res.status(error.status).json({ message: error.message });
         }
 
-        // Map category to icon
-        const iconMap = {
-            salary: "LuWalletMinimal",
-            freelance: "LuLaptop",
-            business: "LuBuilding",
-            investment: "LuTrendingUp",
-            others: "LuUtensils"
-        };
-        const icon = iconMap[category.toLowerCase()] || "LuUtensils";
-
-        const newIncome = new Income({
-            userId,
-            title,
-            category,
-            amount,
-            date: new Date(date),
-            icon
-        })
-
-        await newIncome.save();
-        res.status(200).json(newIncome);
-
-    } catch (error) {
         res.status(500).json({ message: "server error" })
+    }
+}
+
+exports.updateIncome = async (req, res) => {
+    try {
+        const updatedIncome = await updateTransaction({
+            transactionType: "income",
+            transactionId: req.params.id,
+            userId: req.user.id,
+            payload: req.body,
+        });
+        return res.status(200).json(updatedIncome);
+    } catch (error) {
+        if (error instanceof TransactionServiceError) {
+            return res.status(error.status).json({ message: error.message });
+        }
+
+        return res.status(500).json({ message: "server error", error: error.message });
     }
 }
 
@@ -55,7 +68,15 @@ exports.getAllIncome = async (req, res) => {
 // Delete Income Source
 exports.deleteIncome = async (req, res) => {
     try {
-        await Income.findByIdAndDelete(req.params.id)
+        const deletedIncome = await Income.findOneAndDelete({
+            _id: req.params.id,
+            userId: req.user.id,
+        });
+
+        if (!deletedIncome) {
+            return res.status(404).json({ message: "Income not found" });
+        }
+
         res.json({ message: "income deleted successfully" })
     } catch (err) {
         res.status(500).json({ message: "server error", error: err.message })
@@ -77,11 +98,11 @@ exports.downloadIncomeExcel = async (req, res) => {
             Date: item.date,
         }))
 
-        const wb = xlsx.utils.book_new();
-        const ws = xlsx.utils.json_to_sheet(data);
-        xlsx.utils.book_append_sheet(wb, ws, "Income")
-        xlsx.writeFile(wb, 'income_details.xlsx')
-        res.download('income_details.xlsx')
+        const buffer = buildWorkbookBuffer("Income", data);
+
+        res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        res.setHeader("Content-Disposition", 'attachment; filename="income_details.xlsx"');
+        res.send(buffer);
 
     } catch (err) {
         res.status(500).json({ message: "server error", error: err.message })

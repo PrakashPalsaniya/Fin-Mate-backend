@@ -1,11 +1,12 @@
+const path = require("path")
 const dotenv = require("dotenv");
-dotenv.config();
+
+dotenv.config({ path: path.resolve(__dirname, ".env") });
 
 const cors = require("cors")
-const path = require("path")
 const session = require("express-session")
-
 const express = require("express")
+
 const app = express()
 
 const connectDB = require("./config/db.js")
@@ -14,71 +15,128 @@ const client = require("./config/redis.js")
 const authRoutes = require("./routes/authRoutes.js")
 const incomeRoutes = require("./routes/incomeRoutes.js")
 const expenseRoutes = require("./routes/expenseRoutes.js")
+const budgetRoutes = require("./routes/budgetRoutes.js")
 const dashboardRoutes = require("./routes/dashboardRoutes.js")
 const aiSummaryRoutes = require("./routes/aiSummaryRoutes.js")
 const chatRoutes = require("./routes/chatRoutes.js")
-const goalRoutes = require("./routes/goalRoutes.js")
+const settingsRoutes = require("./routes/settingsRoutes.js")
+const telegramRoutes = require("./routes/telegramRoutes.js")
+const summaryDeliveryRoutes = require("./routes/summaryDeliveryRoutes.js")
+const { startSummaryScheduler, stopSummaryScheduler } = require("./services/summarySchedulerService.js")
 
+const getAllowedOrigins = () => {
+    const configuredOrigins =
+        process.env.CLIENT_URL ||
+        process.env.FRONTEND_URL ||
+        "http://localhost:5173";
 
-// Middleware to handle CORS
+    return configuredOrigins
+        .split(",")
+        .map((origin) => origin.trim())
+        .filter(Boolean);
+};
+
+const allowedOrigins = getAllowedOrigins();
+const isProduction = process.env.NODE_ENV === "production";
+
 app.use(
     cors({
-        origin: "*",
-        // This line tells your server who is allowed to make requests to it (like sending or getting data).
+        origin: (origin, callback) => {
+            if (!origin || allowedOrigins.includes(origin)) {
+                return callback(null, true);
+            }
+
+            return callback(new Error("Origin not allowed by CORS"));
+        },
         methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
         allowedHeaders: ["Content-type", "Authorization"],
+        credentials: true,
     })
 )
 
 app.use(express.json());
 
-// Session middleware
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'your-session-secret',
-  resave: false,
-  saveUninitialized: false,
-  cookie: { secure: false } // Set to true in production with HTTPS
+    secret: process.env.SESSION_SECRET || "your-session-secret",
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+        secure: isProduction,
+        sameSite: "lax",
+        httpOnly: true,
+    }
 }));
 
-// Passport middleware
 app.use(passport.initialize());
 app.use(passport.session());
 
-connectDB();
+try {
+    console.log("Loading authRoutes...");
+    app.use("/api/v1/auth", authRoutes);
 
-app.use("/api/v1/auth", authRoutes);
-app.use("/api/v1/income", incomeRoutes);
-app.use("/api/v1/expense", expenseRoutes);
-app.use("/api/v1/dashboard", dashboardRoutes);
-app.use("/api/v1/ai-summary", aiSummaryRoutes);
-app.use("/api/v1/chat", chatRoutes);
-app.use("/api/v1/goals", goalRoutes);
+    console.log("Loading incomeRoutes...");
+    app.use("/api/v1/income", incomeRoutes);
 
-// Serve uploads folder
+    console.log("Loading expenseRoutes...");
+    app.use("/api/v1/expense", expenseRoutes);
+
+    console.log("Loading budgetRoutes...");
+    app.use("/api/v1/budgets", budgetRoutes);
+
+    console.log("Loading dashboardRoutes...");
+    app.use("/api/v1/dashboard", dashboardRoutes);
+
+    console.log("Loading aiSummaryRoutes...");
+    app.use("/api/v1/ai-summary", aiSummaryRoutes);
+
+    console.log("Loading chatRoutes...");
+    app.use("/api/v1/chat", chatRoutes);
+
+    console.log("Loading settingsRoutes...");
+    app.use("/api/v1/settings", settingsRoutes);
+
+    console.log("Loading telegramRoutes...");
+    app.use("/api/v1/telegram", telegramRoutes);
+
+    console.log("Loading summaryDeliveryRoutes...");
+    app.use("/api/v1/summary-delivery", summaryDeliveryRoutes);
+} catch (error) {
+    console.error("Error loading routes:", error);
+    process.exit(1);
+}
+
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
-app.get('/', (req, res) => {
-    res.send('Hello, World!');
-});
-
-// Graceful shutdown
-process.on('SIGINT', async () => {
-    console.log('Shutting down gracefully...');
+process.on("SIGINT", async () => {
+    console.log("Shutting down gracefully...");
+    stopSummaryScheduler();
     if (client.isConnected()) {
         await client.quit();
     }
     process.exit(0);
 });
 
-process.on('SIGTERM', async () => {
-    console.log('Shutting down gracefully...');
+process.on("SIGTERM", async () => {
+    console.log("Shutting down gracefully...");
+    stopSummaryScheduler();
     if (client.isConnected()) {
         await client.quit();
     }
     process.exit(0);
 });
 
-const port = process.env.PORT || 5000;
-app.listen(port, () => {
-    console.log(`server running on port ${port}`)
-})
+const startServer = async () => {
+    await connectDB();
+    await client.connect();
+    startSummaryScheduler();
+
+    const port = process.env.PORT || 5000;
+    app.listen(port, () => {
+        console.log(`server running on port ${port}`)
+    });
+};
+
+startServer().catch((error) => {
+    console.error("Failed to start server:", error);
+    process.exit(1);
+});

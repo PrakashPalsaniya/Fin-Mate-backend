@@ -5,7 +5,9 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "telegram:webhook:set": "node scripts/setupTelegramWebhook.js",
+    "telegram:webhook:info": "node scripts/getTelegramWebhookInfo.js"
   },
   "keywords": [],
   "author": "",

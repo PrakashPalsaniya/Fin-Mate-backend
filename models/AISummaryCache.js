@@ -15,7 +15,7 @@ const aiSummaryCacheSchema = new mongoose.Schema({
   dataType: {
     type: String,
     required: true,
-    enum: ["financial", "goals"], // Add goals type
+    enum: ["financial"],
     default: "financial"
   },
   financialData: {
