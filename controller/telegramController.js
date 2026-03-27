@@ -5,7 +5,11 @@ const {
     getFinancialSummary,
     normalizeSummaryRange,
 } = require("../services/financialSummaryService.js");
-const { isTelegramSecretValid, getTelegramPublicConfig } = require("../services/telegram/telegramConfig.js");
+const {
+    getTelegramPublicConfig,
+    isTelegramSecretValid,
+    isTelegramWebhookSecretConfigured,
+} = require("../services/telegram/telegramConfig.js");
 const {
     answerCallbackQuery,
     editMessageText,
@@ -461,6 +465,12 @@ const handleTelegramCallbackQuery = async (callbackQuery) => {
 
 const handleTelegramWebhook = async (req, res) => {
     const incomingSecret = req.get("x-telegram-bot-api-secret-token");
+
+    if (!isTelegramWebhookSecretConfigured()) {
+        return res.status(503).json({
+            message: "Telegram webhook secret is not configured",
+        });
+    }
 
     if (!isTelegramSecretValid(incomingSecret)) {
         return res.status(401).json({ message: "Invalid Telegram secret" });

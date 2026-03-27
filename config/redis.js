@@ -24,6 +24,9 @@ const redisPort = Number(process.env.REDIS_PORT || 6379);
 const redisConnectTimeout = Number(process.env.REDIS_CONNECT_TIMEOUT_MS || 5000);
 const redisMaxRetries = Number(process.env.REDIS_MAX_RETRIES || 3);
 const redisDisabled = String(process.env.REDIS_DISABLED || "").trim().toLowerCase() === "true";
+const redisRequiredInProduction =
+    isProduction &&
+    String(process.env.REDIS_REQUIRED_IN_PRODUCTION || "true").trim().toLowerCase() !== "false";
 const hasExplicitRedisConfig = Boolean(
     redisUrl ||
     process.env.REDIS_HOST ||
@@ -32,6 +35,14 @@ const hasExplicitRedisConfig = Boolean(
 );
 const shouldAttemptRedis = !redisDisabled && (hasExplicitRedisConfig || !isProduction);
 let client;
+
+if (redisRequiredInProduction && redisDisabled) {
+    throw new Error("Redis cannot be disabled in production when REDIS_REQUIRED_IN_PRODUCTION is enabled.");
+}
+
+if (redisRequiredInProduction && !hasExplicitRedisConfig) {
+    throw new Error("Redis must be explicitly configured in production.");
+}
 
 const buildSocketConfig = (overrides = {}) => ({
     connectTimeout: redisConnectTimeout,
@@ -64,10 +75,16 @@ if (shouldAttemptRedis) {
                 }
         );
     } catch (error) {
+        if (redisRequiredInProduction) {
+            throw error;
+        }
         console.error("Invalid Redis configuration, falling back to in-memory storage:", error.message);
         client = null;
     }
 } else {
+    if (redisRequiredInProduction) {
+        throw new Error("Redis is required in production but was not configured.");
+    }
     console.warn("Redis disabled or not configured for this environment. Using in-memory storage.");
 }
 
@@ -116,6 +133,9 @@ const redisWrapper = {
             .catch((err) => {
                 console.error("Failed to connect to Redis, using in-memory storage:", err.message);
                 redisConnected = false;
+                if (redisRequiredInProduction) {
+                    throw err;
+                }
             })
             .finally(() => {
                 connectPromise = null;
@@ -169,7 +189,7 @@ const redisWrapper = {
     // Delete key(s)
     del: async (...keys) => {
         if (redisConnected) {
-            return await client.del(keys);
+            return await client.del(...keys);
         } else {
             let count = 0;
             for (const key of keys) {

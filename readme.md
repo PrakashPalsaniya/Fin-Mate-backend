@@ -13,7 +13,6 @@ This is the backend API for FinMate, an expense tracker built with Node.js, Expr
 - Finance chat assistant
 - Telegram bot quick capture
 - Scheduled daily/weekly/monthly summary delivery
-- Profile image uploads
 - Excel export for income and expense data
 
 ## Project Structure
@@ -25,7 +24,6 @@ backend/
 |-- middlewares/
 |-- models/
 |-- routes/
-|-- uploads/
 |-- utils/
 |-- .env
 |-- .env.example
@@ -63,7 +61,6 @@ MONGO_URI=mongodb://localhost:27017/expense-tracker
 PORT=5000
 CLIENT_URL=http://localhost:3000
 JWT_SECRET=your-jwt-secret
-SESSION_SECRET=your-session-secret
 GOOGLE_CLIENT_ID=your-google-client-id
 GOOGLE_CLIENT_SECRET=your-google-client-secret
 GOOGLE_CALLBACK_URL=http://localhost:5000/api/v1/auth/google/callback
@@ -95,7 +92,6 @@ The backend runs on `http://localhost:5000`.
 - `GET /api/v1/auth/google`
 - `GET /api/v1/auth/google/callback`
 - `GET /api/v1/auth/exchange-google-code`
-- `POST /api/v1/auth/upload-image`
 
 ### Dashboard
 
@@ -143,7 +139,6 @@ The current backend code expects these main variables:
 - `PORT`
 - `CLIENT_URL`
 - `JWT_SECRET`
-- `SESSION_SECRET`
 - `GOOGLE_CLIENT_ID`
 - `GOOGLE_CLIENT_SECRET`
 - `GOOGLE_CALLBACK_URL`

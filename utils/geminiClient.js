@@ -6,6 +6,18 @@ const getGeminiUrl = () => {
     return `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
 };
 
+const getGeminiTextParts = (responseData) => {
+    const parts = responseData?.candidates?.[0]?.content?.parts;
+
+    if (!Array.isArray(parts)) {
+        return [];
+    }
+
+    return parts
+        .map((part) => (typeof part?.text === "string" ? part.text : ""))
+        .filter(Boolean);
+};
+
 const getGeminiErrorStatus = (error) => Number(error?.response?.status || 0);
 
 const getGeminiErrorMessage = (error) => {
@@ -87,6 +99,7 @@ const logGeminiError = (context, error) => {
 module.exports = {
     GEMINI_API_KEY,
     GEMINI_MODEL,
+    getGeminiTextParts,
     getGeminiErrorStatus,
     getGeminiRetryDelayMs,
     getGeminiUrl,

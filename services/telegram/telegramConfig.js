@@ -48,6 +48,7 @@ const getTelegramWebhookSecret = () => getTelegramEnv().webhookSecret;
 const getTelegramLinkCodeTtlSeconds = () => getTelegramEnv().linkCodeTtlSeconds;
 const getTelegramPendingIntentTtlSeconds = () => getTelegramEnv().pendingIntentTtlSeconds;
 const getTelegramProcessedUpdateTtlSeconds = () => getTelegramEnv().processedUpdateTtlSeconds;
+const isTelegramWebhookSecretConfigured = () => Boolean(getTelegramWebhookSecret());
 
 const isTelegramConfigured = () => Boolean(getTelegramBotToken());
 
@@ -94,7 +95,7 @@ const isTelegramSecretValid = (incomingSecret) => {
     const webhookSecret = getTelegramWebhookSecret();
 
     if (!webhookSecret) {
-        return true;
+        return false;
     }
 
     const expectedBuffer = Buffer.from(webhookSecret);
@@ -121,6 +122,7 @@ module.exports = {
     getTelegramWebhookSecret,
     getTelegramWebhookUrl,
     isTelegramConfigured,
+    isTelegramWebhookSecretConfigured,
     isTelegramSecretValid,
     loadTelegramEnv,
 };

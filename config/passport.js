@@ -1,59 +1,51 @@
-const passport = require('passport');
-const GoogleStrategy = require('passport-google-oauth20').Strategy;
-const User = require('../models/User');
+const passport = require("passport");
+const GoogleStrategy = require("passport-google-oauth20").Strategy;
+const User = require("../models/User");
 
-passport.use(new GoogleStrategy({
-    clientID: process.env.GOOGLE_CLIENT_ID,
-    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-     callbackURL:  process.env.GOOGLE_CALLBACK_URL
-  },
-  async (accessToken, refreshToken, profile, done) => {
-    try {
-      let user = await User.findOne({ googleId: profile.id });
+passport.use(
+    new GoogleStrategy(
+        {
+            clientID: process.env.GOOGLE_CLIENT_ID,
+            clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+            callbackURL: process.env.GOOGLE_CALLBACK_URL,
+        },
+        async (_accessToken, _refreshToken, profile, done) => {
+            try {
+                const email = String(profile?.emails?.[0]?.value || "").trim().toLowerCase();
 
-      if (user) {
-        return done(null, user);
-      }
+                if (!email) {
+                    return done(new Error("Google account did not provide an email address"), null);
+                }
 
-      // Check if user exists with same email
-      user = await User.findOne({ email: profile.emails[0].value });
+                let user = await User.findOne({ googleId: profile.id });
 
-      if (user) {
-        // Link Google account to existing user
-        user.googleId = profile.id;
-        user.authProvider = 'google';
-        await user.save();
-        return done(null, user);
-      }
+                if (user) {
+                    return done(null, user);
+                }
 
-      // Create new user
-      user = new User({
-        googleId: profile.id,
-        fullName: profile.displayName,
-        email: profile.emails[0].value,
-        profileImageUrl: profile.photos[0].value,
-        authProvider: 'google'
-      });
+                user = await User.findOne({ email });
 
-      await user.save();
-      return done(null, user);
-    } catch (error) {
-      return done(error, null);
-    }
-  }
-));
+                if (user) {
+                    user.googleId = profile.id;
+                    user.authProvider = "google";
+                    await user.save();
+                    return done(null, user);
+                }
 
-passport.serializeUser((user, done) => {
-  done(null, user.id);
-});
+                user = new User({
+                    googleId: profile.id,
+                    fullName: String(profile?.displayName || "Google User").trim(),
+                    email,
+                    authProvider: "google",
+                });
 
-passport.deserializeUser(async (id, done) => {
-  try {
-    const user = await User.findById(id);
-    done(null, user);
-  } catch (error) {
-    done(error, null);
-  }
-});
+                await user.save();
+                return done(null, user);
+            } catch (error) {
+                return done(error, null);
+            }
+        }
+    )
+);
 
 module.exports = passport;

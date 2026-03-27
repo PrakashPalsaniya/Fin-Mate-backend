@@ -7,6 +7,7 @@ const { Types } = require("mongoose");
 const { normalizeUserSettings } = require("../utils/userSettings.js");
 const { getZonedDateParts } = require("../utils/timezone.js");
 const {
+  getGeminiTextParts,
   getGeminiUrl,
   isGeminiQuotaError,
   logGeminiError,
@@ -915,7 +916,7 @@ CRITICAL: Use ₹ symbol and Indian number formatting. Be SPECIFIC to their data
       throw error;
     }
 
-    const rawText = response.data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const rawText = getGeminiTextParts(response.data).join("");
 
     if (!rawText) {
       console.error("No response text from Gemini");

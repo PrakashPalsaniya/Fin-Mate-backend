@@ -24,6 +24,9 @@ const SUMMARY_FREQUENCIES = Object.freeze(["daily", "weekly", "monthly"]);
 const SUMMARY_DELIVERY_RETRY_COOLDOWN_MS = Number(
     process.env.SUMMARY_DELIVERY_RETRY_COOLDOWN_MS || 15 * 60 * 1000
 );
+const SUMMARY_MANUAL_SEND_DEDUP_SECONDS = Number(
+    process.env.SUMMARY_MANUAL_SEND_DEDUP_SECONDS || 5 * 60
+);
 
 const isSummaryDeliveryRetryCooldownActive = (deliveryRecord) => {
     const lastAttemptAt = new Date(deliveryRecord?.lastAttemptAt || 0).getTime();
@@ -254,6 +257,13 @@ const mapUnclaimedSummaryChannelResult = ({ channel, claimResult }) => ({
     reason: claimResult.reason || "already_processed",
 });
 
+const buildManualSummaryDeliveryKey = ({ frequency, now }) => {
+    const dedupWindowMs = Math.max(1, SUMMARY_MANUAL_SEND_DEDUP_SECONDS) * 1000;
+    const dedupBucket = Math.floor(new Date(now).getTime() / dedupWindowMs);
+
+    return `manual:${normalizeSummaryRange(frequency)}:${dedupBucket}`;
+};
+
 const deliverSummary = async ({
     user,
     frequency,
@@ -278,7 +288,13 @@ const deliverSummary = async ({
     }
 
     const effectiveDeliveryKey =
-        deliveryKey || `manual:${normalizedFrequency}:${now.toISOString()}`;
+        deliveryKey ||
+        (source === "manual"
+            ? buildManualSummaryDeliveryKey({
+                frequency: normalizedFrequency,
+                now,
+            })
+            : `scheduled:${normalizedFrequency}:${now.toISOString()}`);
     const claimResults = [];
 
     for (const channel of channels) {
@@ -420,6 +436,7 @@ module.exports = {
     SUMMARY_CHANNELS,
     SUMMARY_FREQUENCIES,
     deliverSummary,
+    buildManualSummaryDeliveryKey,
     getEligibleSummaryChannels,
     getScheduledSummaryContexts,
     getSummaryDeliveryHistory,

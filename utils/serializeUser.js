@@ -5,7 +5,6 @@ const serializeUser = (user) => ({
     id: user._id,
     fullName: user.fullName,
     email: user.email,
-    profileImageUrl: user.profileImageUrl,
     authProvider: user.authProvider,
     settings: normalizeUserSettings(user.settings || {}),
     telegram: serializeTelegramAccount(user.telegram),

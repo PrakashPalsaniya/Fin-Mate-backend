@@ -1,42 +1,59 @@
-const express = require("express")
-const passport = require("../config/passport.js")
-const { protect } = require("../middlewares/authMiddleware.js")
+const express = require("express");
+const passport = require("../config/passport.js");
 const {
-    otpSendRateLimiter,
-    otpVerifyRateLimiter,
-} = require("../middlewares/rateLimitMiddleware.js")
-const upload = require("../middlewares/uploadMiddleware.js");
-
-const {
-    registerUser,
-    loginUser,
+    createGoogleAuthState,
+    exchangeGoogleCode,
     getUserInfo,
     googleAuthCallback,
-    exchangeGoogleCode,
+    loginUser,
+    registerUser,
     sendOTP,
+    validateGoogleAuthState,
     verifyOTPAndRegister,
 } = require("../controller/authController.js");
+const { protect } = require("../middlewares/authMiddleware.js");
+const {
+    googleCodeExchangeRateLimiter,
+    loginRateLimiter,
+    otpSendRateLimiter,
+    otpVerifyRateLimiter,
+} = require("../middlewares/rateLimitMiddleware.js");
 
 const router = express.Router();
-const loginFailureRedirect = `${process.env.CLIENT_URL || process.env.FRONTEND_URL || "http://localhost:5173"}/login`;
+const loginFailureRedirect = `${String(
+    process.env.CLIENT_URL || process.env.FRONTEND_URL || "http://localhost:5173"
+)
+    .trim()
+    .replace(/\/+$/, "")}/login`;
 
 router.post("/register", registerUser);
 router.post("/send-otp", otpSendRateLimiter, sendOTP);
 router.post("/verify-otp", otpVerifyRateLimiter, verifyOTPAndRegister);
-router.post("/login", loginUser);
+router.post("/login", loginRateLimiter, loginUser);
 router.get("/getUser", protect, getUserInfo);
 
-// Google OAuth routes
-router.get("/google", passport.authenticate("google", { scope: ["profile", "email"] }));
-router.get("/google/callback", passport.authenticate("google", { failureRedirect: loginFailureRedirect }), googleAuthCallback);
-router.get("/exchange-google-code", exchangeGoogleCode);
-router.post("/upload-image", upload.single("image"), (req, res)=>{
-    if (!req.file) {
-        return res.status(409).json({message: "no file uploaded"})
-    }
-    const imageUrl = `${req.protocol}://${req.get("host")}/uploads/${req.file.filename}`
+router.get(
+    "/google",
+    createGoogleAuthState,
+    (req, res, next) =>
+        passport.authenticate("google", {
+            scope: ["profile", "email"],
+            session: false,
+            state: req.googleOAuthState,
+        })(req, res, next)
+);
 
-    res.status(200).json({imageUrl})
-})
+router.get(
+    "/google/callback",
+    validateGoogleAuthState,
+    (req, res, next) =>
+        passport.authenticate("google", {
+            failureRedirect: loginFailureRedirect,
+            session: false,
+        })(req, res, next),
+    googleAuthCallback
+);
 
-module.exports = router
+router.get("/exchange-google-code", googleCodeExchangeRateLimiter, exchangeGoogleCode);
+
+module.exports = router;

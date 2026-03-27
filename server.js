@@ -1,28 +1,29 @@
-const path = require("path")
+const path = require("path");
 const dotenv = require("dotenv");
 
 dotenv.config({ path: path.resolve(__dirname, ".env") });
 
-const cors = require("cors")
-const session = require("express-session")
-const express = require("express")
+const cors = require("cors");
+const express = require("express");
 
-const app = express()
+const connectDB = require("./config/db.js");
+const passport = require("./config/passport.js");
+const client = require("./config/redis.js");
+const aiSummaryRoutes = require("./routes/aiSummaryRoutes.js");
+const authRoutes = require("./routes/authRoutes.js");
+const budgetRoutes = require("./routes/budgetRoutes.js");
+const chatRoutes = require("./routes/chatRoutes.js");
+const dashboardRoutes = require("./routes/dashboardRoutes.js");
+const expenseRoutes = require("./routes/expenseRoutes.js");
+const incomeRoutes = require("./routes/incomeRoutes.js");
+const settingsRoutes = require("./routes/settingsRoutes.js");
+const summaryDeliveryRoutes = require("./routes/summaryDeliveryRoutes.js");
+const telegramRoutes = require("./routes/telegramRoutes.js");
+const { startSummaryScheduler, stopSummaryScheduler } = require("./services/summarySchedulerService.js");
 
-const connectDB = require("./config/db.js")
-const passport = require("./config/passport.js")
-const client = require("./config/redis.js")
-const authRoutes = require("./routes/authRoutes.js")
-const incomeRoutes = require("./routes/incomeRoutes.js")
-const expenseRoutes = require("./routes/expenseRoutes.js")
-const budgetRoutes = require("./routes/budgetRoutes.js")
-const dashboardRoutes = require("./routes/dashboardRoutes.js")
-const aiSummaryRoutes = require("./routes/aiSummaryRoutes.js")
-const chatRoutes = require("./routes/chatRoutes.js")
-const settingsRoutes = require("./routes/settingsRoutes.js")
-const telegramRoutes = require("./routes/telegramRoutes.js")
-const summaryDeliveryRoutes = require("./routes/summaryDeliveryRoutes.js")
-const { startSummaryScheduler, stopSummaryScheduler } = require("./services/summarySchedulerService.js")
+const app = express();
+const JSON_BODY_LIMIT = String(process.env.JSON_BODY_LIMIT || "100kb").trim();
+const isProduction = process.env.NODE_ENV === "production";
 
 const normalizeOrigin = (origin = "") => String(origin || "").trim().replace(/\/+$/, "");
 
@@ -38,8 +39,53 @@ const getAllowedOrigins = () => {
         .filter(Boolean);
 };
 
+const looksLikePlaceholderSecret = (value = "") =>
+    /^(your-|change-this|replace-this|example|test)/i.test(String(value || "").trim());
+
+const requireConfiguredEnv = (name, { allowPlaceholder = false } = {}) => {
+    const value = String(process.env[name] || "").trim();
+
+    if (!value) {
+        throw new Error(`${name} is required`);
+    }
+
+    if (!allowPlaceholder && looksLikePlaceholderSecret(value)) {
+        throw new Error(`${name} must be replaced with a real secret before starting the server`);
+    }
+
+    return value;
+};
+
+const validateServerConfiguration = () => {
+    requireConfiguredEnv("JWT_SECRET");
+
+    if (isProduction) {
+        const frontendOrigins = [
+            String(process.env.CLIENT_URL || "").trim(),
+            String(process.env.FRONTEND_URL || "").trim(),
+        ].filter(Boolean);
+
+        if (frontendOrigins.length === 0) {
+            throw new Error("CLIENT_URL or FRONTEND_URL must be configured in production");
+        }
+
+        if (String(process.env.TELEGRAM_BOT_TOKEN || "").trim()) {
+            requireConfiguredEnv("TELEGRAM_WEBHOOK_SECRET");
+        }
+    }
+};
+
 const allowedOrigins = getAllowedOrigins();
-const isProduction = process.env.NODE_ENV === "production";
+
+validateServerConfiguration();
+
+app.set("trust proxy", 1);
+app.disable("x-powered-by");
+
+app.use((req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    next();
+});
 
 app.use(
     cors({
@@ -54,12 +100,14 @@ app.use(
             return callback(new Error("Origin not allowed by CORS"));
         },
         methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
-        allowedHeaders: ["Content-type", "Authorization"],
+        allowedHeaders: ["Content-Type", "Authorization"],
         credentials: true,
     })
-)
+);
 
-app.use(express.json());
+app.use(express.json({ limit: JSON_BODY_LIMIT }));
+app.use(express.urlencoded({ extended: false, limit: JSON_BODY_LIMIT }));
+app.use(passport.initialize());
 
 app.get("/", (_req, res) => {
     res.status(200).json({
@@ -67,20 +115,6 @@ app.get("/", (_req, res) => {
         service: "finmate-backend",
     });
 });
-
-app.use(session({
-    secret: process.env.SESSION_SECRET || "your-session-secret",
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-        secure: isProduction,
-        sameSite: "lax",
-        httpOnly: true,
-    }
-}));
-
-app.use(passport.initialize());
-app.use(passport.session());
 
 try {
     console.log("Loading authRoutes...");
@@ -117,8 +151,6 @@ try {
     process.exit(1);
 }
 
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
-
 process.on("SIGINT", async () => {
     console.log("Shutting down gracefully...");
     stopSummaryScheduler();
@@ -139,16 +171,14 @@ process.on("SIGTERM", async () => {
 
 const startServer = async () => {
     await connectDB();
+    await client.connect();
 
     const port = process.env.PORT || 5000;
     app.listen(port, () => {
-        console.log(`server running on port ${port}`)
+        console.log(`server running on port ${port}`);
     });
 
     startSummaryScheduler();
-    client.connect().catch((error) => {
-        console.error("Redis startup skipped, using in-memory storage:", error.message);
-    });
 };
 
 startServer().catch((error) => {

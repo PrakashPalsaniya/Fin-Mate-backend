@@ -2,6 +2,11 @@ const crypto = require("crypto");
 const redis = require("../config/redis.js");
 
 const RATE_LIMIT_VERSION = 1;
+const isProduction = process.env.NODE_ENV === "production";
+const rateLimitFailOpen =
+    String(process.env.RATE_LIMIT_FAIL_OPEN || (isProduction ? "false" : "true"))
+        .trim()
+        .toLowerCase() === "true";
 
 const OTP_SEND_RATE_LIMIT_WINDOW_SECONDS = Number(
     process.env.OTP_SEND_RATE_LIMIT_WINDOW_SECONDS || 15 * 60
@@ -15,6 +20,12 @@ const OTP_VERIFY_RATE_LIMIT_WINDOW_SECONDS = Number(
 const OTP_VERIFY_RATE_LIMIT_MAX = Number(
     process.env.OTP_VERIFY_RATE_LIMIT_MAX || 10
 );
+const LOGIN_RATE_LIMIT_WINDOW_SECONDS = Number(
+    process.env.LOGIN_RATE_LIMIT_WINDOW_SECONDS || 15 * 60
+);
+const LOGIN_RATE_LIMIT_MAX = Number(
+    process.env.LOGIN_RATE_LIMIT_MAX || 10
+);
 const AI_SUMMARY_RATE_LIMIT_WINDOW_SECONDS = Number(
     process.env.AI_SUMMARY_RATE_LIMIT_WINDOW_SECONDS || 10 * 60
 );
@@ -26,6 +37,18 @@ const CHAT_RATE_LIMIT_WINDOW_SECONDS = Number(
 );
 const CHAT_RATE_LIMIT_MAX = Number(
     process.env.CHAT_RATE_LIMIT_MAX || 30
+);
+const GOOGLE_CODE_EXCHANGE_RATE_LIMIT_WINDOW_SECONDS = Number(
+    process.env.GOOGLE_CODE_EXCHANGE_RATE_LIMIT_WINDOW_SECONDS || 15 * 60
+);
+const GOOGLE_CODE_EXCHANGE_RATE_LIMIT_MAX = Number(
+    process.env.GOOGLE_CODE_EXCHANGE_RATE_LIMIT_MAX || 30
+);
+const SUMMARY_SEND_RATE_LIMIT_WINDOW_SECONDS = Number(
+    process.env.SUMMARY_SEND_RATE_LIMIT_WINDOW_SECONDS || 15 * 60
+);
+const SUMMARY_SEND_RATE_LIMIT_MAX = Number(
+    process.env.SUMMARY_SEND_RATE_LIMIT_MAX || 3
 );
 
 const normalizeEmail = (email = "") => String(email || "").trim().toLowerCase();
@@ -119,6 +142,11 @@ const createRedisRateLimiter = ({
             return next();
         } catch (error) {
             console.error(`Rate limit check failed for ${keyPrefix}:`, error.message);
+            if (isProduction && !rateLimitFailOpen) {
+                return res.status(503).json({
+                    message: "The request protection service is temporarily unavailable. Please try again shortly.",
+                });
+            }
             return next();
         }
     };
@@ -156,6 +184,22 @@ const otpVerifyRateLimiter = createRedisRateLimiter({
     },
 });
 
+const loginRateLimiter = createRedisRateLimiter({
+    keyPrefix: "login",
+    maxRequests: LOGIN_RATE_LIMIT_MAX,
+    windowSeconds: LOGIN_RATE_LIMIT_WINDOW_SECONDS,
+    message: "Too many sign-in attempts. Please wait before trying again.",
+    buildIdentifiers: (req) => {
+        const email = normalizeEmail(req.body?.email);
+        const ip = getClientIp(req);
+
+        return [
+            email ? `email:${email}` : null,
+            ip ? `ip:${ip}` : null,
+        ];
+    },
+});
+
 const aiSummaryRateLimiter = createRedisRateLimiter({
     keyPrefix: "ai_summary",
     maxRequests: AI_SUMMARY_RATE_LIMIT_MAX,
@@ -176,11 +220,34 @@ const chatRateLimiter = createRedisRateLimiter({
     ],
 });
 
+const googleCodeExchangeRateLimiter = createRedisRateLimiter({
+    keyPrefix: "google_code_exchange",
+    maxRequests: GOOGLE_CODE_EXCHANGE_RATE_LIMIT_MAX,
+    windowSeconds: GOOGLE_CODE_EXCHANGE_RATE_LIMIT_WINDOW_SECONDS,
+    message: "Too many Google sign-in attempts. Please wait before trying again.",
+    buildIdentifiers: (req) => [
+        `ip:${getClientIp(req)}`,
+    ],
+});
+
+const summarySendRateLimiter = createRedisRateLimiter({
+    keyPrefix: "summary_send_manual",
+    maxRequests: SUMMARY_SEND_RATE_LIMIT_MAX,
+    windowSeconds: SUMMARY_SEND_RATE_LIMIT_WINDOW_SECONDS,
+    message: "Summary sending is being used too quickly. Please wait before sending again.",
+    buildIdentifiers: (req) => [
+        req.user?.id ? `user:${req.user.id}` : `ip:${getClientIp(req)}`,
+    ],
+});
+
 module.exports = {
     aiSummaryRateLimiter,
     chatRateLimiter,
     createRedisRateLimiter,
     getClientIp,
+    googleCodeExchangeRateLimiter,
+    loginRateLimiter,
     otpSendRateLimiter,
     otpVerifyRateLimiter,
+    summarySendRateLimiter,
 };
