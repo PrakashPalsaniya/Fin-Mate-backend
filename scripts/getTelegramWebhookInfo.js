@@ -3,7 +3,7 @@ const dotenv = require("dotenv");
 
 dotenv.config({ path: path.resolve(__dirname, "..", ".env") });
 
-const { getWebhookInfo } = require("../services/telegram/telegramApi.js");
+const { getWebhookInfo } = require("../src/modules/telegram/services/telegramApi.js");
 
 const run = async () => {
     const result = await getWebhookInfo();
