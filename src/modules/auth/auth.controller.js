@@ -85,7 +85,6 @@ const buildCookie = ({
     httpOnly = true,
     sameSite = "None",
     secure,
-    domain,
     expires,
 }) => {
     // For localhost development (HTTP), don't use Secure flag
@@ -98,10 +97,6 @@ const buildCookie = ({
         `Path=${path}`,
         `SameSite=${sameSite}`,
     ];
-
-    if (domain) {
-        parts.push(`Domain=${domain}`);
-    }
 
     if (httpOnly) {
         parts.push("HttpOnly");
