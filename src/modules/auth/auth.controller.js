@@ -67,7 +67,9 @@ const buildCookie = ({
     maxAgeSeconds,
     path = "/",
     httpOnly = true,
-    sameSite = "Lax",
+    // For production (HTTPS) use SameSite=None so cross-site XHR/POST will include cookies.
+    // In development we keep Lax to avoid Strict browser requirements for Secure flag.
+    sameSite = isProduction ? "None" : "Lax",
     secure = isProduction,
     expires,
 }) => {
