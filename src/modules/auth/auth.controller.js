@@ -50,6 +50,21 @@ const generateRefreshToken = async (user, ipAddress) => {
     return refreshToken;
 };
 
+const parseExpirySeconds = (input) => {
+    const s = String(input || "").trim();
+    if (!s) return undefined;
+    if (/^\d+$/.test(s)) return Number(s);
+    const m = s.match(/^(\d+)([smhd])$/i);
+    if (!m) return undefined;
+    const n = Number(m[1]);
+    const unit = m[2].toLowerCase();
+    if (unit === 's') return n;
+    if (unit === 'm') return n * 60;
+    if (unit === 'h') return n * 60 * 60;
+    if (unit === 'd') return n * 24 * 60 * 60;
+    return undefined;
+};
+
 const appendSetCookie = (res, cookieValue) => {
     const existingHeader = res.getHeader("Set-Cookie");
 
@@ -214,7 +229,7 @@ exports.verifyOTPAndRegister = async (req, res) => {
             buildCookie({
                 name: "accessToken",
                 value: accessToken,
-                maxAgeSeconds: 15 * 60,
+                maxAgeSeconds: parseExpirySeconds(ACCESS_TOKEN_EXPIRES_IN) || 900,
                 path: "/",
             })
         );
@@ -224,7 +239,7 @@ exports.verifyOTPAndRegister = async (req, res) => {
             buildCookie({
                 name: "refreshToken",
                 value: refreshToken.token,
-                maxAgeSeconds: 7 * 24 * 3600,
+                maxAgeSeconds: parseExpirySeconds(REFRESH_TOKEN_EXPIRES_IN) || 604800,
                 path: "/",
             })
         );
@@ -276,7 +291,7 @@ exports.loginUser = async (req, res) => {
             buildCookie({
                 name: "accessToken",
                 value: accessToken,
-                maxAgeSeconds: 15 * 60,
+                maxAgeSeconds: parseExpirySeconds(ACCESS_TOKEN_EXPIRES_IN) || 900,
                 path: "/",
             })
         );
@@ -286,7 +301,7 @@ exports.loginUser = async (req, res) => {
             buildCookie({
                 name: "refreshToken",
                 value: refreshToken.token,
-                maxAgeSeconds: 7 * 24 * 3600,
+                maxAgeSeconds: parseExpirySeconds(REFRESH_TOKEN_EXPIRES_IN) || 604800,
                 path: "/",
             })
         );
@@ -425,7 +440,7 @@ exports.exchangeGoogleCode = async (req, res) => {
             buildCookie({
                 name: "accessToken",
                 value: parsedPayload.accessToken,
-                maxAgeSeconds: 15 * 60,
+                maxAgeSeconds: parseExpirySeconds(ACCESS_TOKEN_EXPIRES_IN) || 900,
                 path: "/",
             })
         );
@@ -435,7 +450,7 @@ exports.exchangeGoogleCode = async (req, res) => {
             buildCookie({
                 name: "refreshToken",
                 value: parsedPayload.refreshToken,
-                maxAgeSeconds: 7 * 24 * 3600,
+                maxAgeSeconds: parseExpirySeconds(REFRESH_TOKEN_EXPIRES_IN) || 604800,
                 path: "/",
             })
         );
@@ -514,7 +529,7 @@ exports.refreshAccessToken = async (req, res) => {
             buildCookie({
                 name: "accessToken",
                 value: newAccessToken,
-                maxAgeSeconds: 15 * 60,
+                maxAgeSeconds: parseExpirySeconds(ACCESS_TOKEN_EXPIRES_IN) || 900,
                 path: "/",
             })
         );
@@ -524,7 +539,7 @@ exports.refreshAccessToken = async (req, res) => {
             buildCookie({
                 name: "refreshToken",
                 value: newRefreshToken.token,
-                maxAgeSeconds: 7 * 24 * 3600,
+                maxAgeSeconds: parseExpirySeconds(REFRESH_TOKEN_EXPIRES_IN) || 604800,
                 path: "/",
             })
         );
