@@ -68,8 +68,8 @@ const buildCookie = ({
     maxAgeSeconds,
     path = "/",
     httpOnly = true,
-    // For production (HTTPS) use SameSite=None so cross-site XHR/POST will include cookies.
-    // In development we keep Lax to avoid Strict browser requirements for Secure flag.
+    // For cross-site cookies (e.g. Vercel frontend -> separate backend),
+    // SameSite=None and Secure=true are REQUIRED.
     sameSite = isProduction ? "None" : "Lax",
     secure = isProduction,
     expires,
