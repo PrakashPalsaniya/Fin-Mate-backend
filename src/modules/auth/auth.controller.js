@@ -216,9 +216,6 @@ exports.verifyOTPAndRegister = async (req, res) => {
                 value: accessToken,
                 maxAgeSeconds: 15 * 60,
                 path: "/",
-                httpOnly: true,
-                sameSite: "Strict",
-                secure: isProduction,
             })
         );
 
@@ -229,9 +226,6 @@ exports.verifyOTPAndRegister = async (req, res) => {
                 value: refreshToken.token,
                 maxAgeSeconds: 7 * 24 * 3600,
                 path: "/",
-                httpOnly: true,
-                sameSite: "Strict",
-                secure: isProduction,
             })
         );
 
@@ -284,9 +278,6 @@ exports.loginUser = async (req, res) => {
                 value: accessToken,
                 maxAgeSeconds: 15 * 60,
                 path: "/",
-                httpOnly: true,
-                sameSite: "Strict",
-                secure: isProduction,
             })
         );
 
@@ -297,9 +288,6 @@ exports.loginUser = async (req, res) => {
                 value: refreshToken.token,
                 maxAgeSeconds: 7 * 24 * 3600,
                 path: "/",
-                httpOnly: true,
-                sameSite: "Strict",
-                secure: isProduction,
             })
         );
 
@@ -439,9 +427,6 @@ exports.exchangeGoogleCode = async (req, res) => {
                 value: parsedPayload.accessToken,
                 maxAgeSeconds: 15 * 60,
                 path: "/",
-                httpOnly: true,
-                sameSite: "Strict",
-                secure: isProduction,
             })
         );
 
@@ -452,9 +437,6 @@ exports.exchangeGoogleCode = async (req, res) => {
                 value: parsedPayload.refreshToken,
                 maxAgeSeconds: 7 * 24 * 3600,
                 path: "/",
-                httpOnly: true,
-                sameSite: "Strict",
-                secure: isProduction,
             })
         );
 
@@ -534,9 +516,6 @@ exports.refreshAccessToken = async (req, res) => {
                 value: newAccessToken,
                 maxAgeSeconds: 15 * 60,
                 path: "/",
-                httpOnly: true,
-                sameSite: "Strict",
-                secure: isProduction,
             })
         );
 
@@ -547,9 +526,6 @@ exports.refreshAccessToken = async (req, res) => {
                 value: newRefreshToken.token,
                 maxAgeSeconds: 7 * 24 * 3600,
                 path: "/",
-                httpOnly: true,
-                sameSite: "Strict",
-                secure: isProduction,
             })
         );
 
