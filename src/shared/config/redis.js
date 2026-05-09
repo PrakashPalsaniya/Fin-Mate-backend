@@ -5,11 +5,18 @@ const isProduction = process.env.NODE_ENV === "production";
 // Normalize Redis URL - handle pasted env format
 const normalizeRedisUrl = (rawUrl) => {
     if (!rawUrl) return "";
+
     const trimmedUrl = String(rawUrl).trim();
+
     if (trimmedUrl.startsWith("REDIS_URL=")) {
         return trimmedUrl.slice("REDIS_URL=".length).trim();
     }
-    return trimmedUrl;
+
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmedUrl)) {
+        return trimmedUrl;
+    }
+
+    return `redis://${trimmedUrl}`;
 };
 
 const redisUrl = normalizeRedisUrl(process.env.REDIS_URL);
