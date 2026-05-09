@@ -1,6 +1,8 @@
 const { createClient } = require("redis");
 
 const isProduction = process.env.NODE_ENV === "production";
+const redisUsername = String(process.env.REDIS_USERNAME || "").trim();
+const redisPassword = String(process.env.REDIS_PASSWORD || "").trim();
 
 // Normalize Redis URL - handle pasted env format
 const normalizeRedisUrl = (rawUrl) => {
@@ -23,8 +25,36 @@ const redisUrl = normalizeRedisUrl(process.env.REDIS_URL);
 const redisConnectTimeout = Number(process.env.REDIS_CONNECT_TIMEOUT_MS || 5000);
 const redisMaxRetries = Number(process.env.REDIS_MAX_RETRIES || 3);
 
+const buildAuthenticatedRedisUrl = (rawUrl) => {
+    const baseUrl = normalizeRedisUrl(rawUrl);
+
+    if (!baseUrl) {
+        return "";
+    }
+
+    const hasInlineCredentials = /:\/\/[^@]+@/i.test(baseUrl);
+
+    if (hasInlineCredentials || (!redisUsername && !redisPassword)) {
+        return baseUrl;
+    }
+
+    const parsedUrl = new URL(baseUrl);
+
+    if (redisUsername) {
+        parsedUrl.username = redisUsername;
+    }
+
+    if (redisPassword) {
+        parsedUrl.password = redisPassword;
+    }
+
+    return parsedUrl.toString();
+};
+
+const resolvedRedisUrl = buildAuthenticatedRedisUrl(redisUrl);
+
 // Validate Redis configuration is provided
-if (!redisUrl) {
+if (!resolvedRedisUrl) {
     throw new Error("REDIS_URL environment variable is required");
 }
 
@@ -47,7 +77,7 @@ let connectPromise = null;
 
 try {
     client = createClient({
-        url: redisUrl,
+        url: resolvedRedisUrl,
         socket: buildSocketConfig(),
     });
 

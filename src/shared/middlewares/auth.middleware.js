@@ -3,6 +3,26 @@ const User = require("../../modules/auth/user.model.js")
 
 exports.protect = async(req, res, next) => {
     let token = req.headers.authorization?.split(" ")[1];
+
+    // Fallback to cookie named 'token' (HttpOnly cookie set by server)
+    if (!token) {
+        const cookieHeader = req.headers.cookie || "";
+        const cookies = String(cookieHeader || "")
+            .split(";")
+            .map((p) => p.trim())
+            .filter(Boolean)
+            .reduce((acc, part) => {
+                const idx = part.indexOf("=");
+                if (idx === -1) return acc;
+                const key = part.slice(0, idx).trim();
+                const val = part.slice(idx + 1).trim();
+                acc[key] = decodeURIComponent(val);
+                return acc;
+            }, {});
+
+        token = cookies.token;
+    }
+
     if (!token) {return res.status(401).json({message: "Not authorized, no token"})};
 
     try {

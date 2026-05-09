@@ -34,6 +34,21 @@ const getRequiredJwtSecret = () => {
 const generateToken = (id) =>
     jwt.sign({ id }, getRequiredJwtSecret(), { expiresIn: JWT_EXPIRES_IN });
 
+const parseExpirySeconds = (input) => {
+    const s = String(input || "").trim();
+    if (!s) return undefined;
+    if (/^\d+$/.test(s)) return Number(s);
+    const m = s.match(/^(\d+)([smhd])$/i);
+    if (!m) return undefined;
+    const n = Number(m[1]);
+    const unit = m[2].toLowerCase();
+    if (unit === 's') return n;
+    if (unit === 'm') return n * 60;
+    if (unit === 'h') return n * 60 * 60;
+    if (unit === 'd') return n * 24 * 60 * 60;
+    return undefined;
+};
+
 const appendSetCookie = (res, cookieValue) => {
     const existingHeader = res.getHeader("Set-Cookie");
 
@@ -187,11 +202,25 @@ exports.verifyOTPAndRegister = async (req, res) => {
             password,
             authProvider: "local",
         });
+        const token = generateToken(user._id);
+        const expiresSeconds = parseExpirySeconds(JWT_EXPIRES_IN) || 7 * 24 * 3600;
+
+        appendSetCookie(
+            res,
+            buildCookie({
+                name: "token",
+                value: token,
+                maxAgeSeconds: expiresSeconds,
+                path: "/",
+                httpOnly: true,
+                sameSite: "Lax",
+                secure: isProduction,
+            })
+        );
 
         return res.status(200).json({
             id: user._id,
             user: serializeUser(user),
-            token: generateToken(user._id),
         });
     } catch (err) {
         console.error("Verify OTP and register error:", err);
@@ -228,10 +257,25 @@ exports.loginUser = async (req, res) => {
             return res.status(400).json({ message: "Invalid credentials" });
         }
 
+        const token = generateToken(user._id);
+        const expiresSeconds = parseExpirySeconds(JWT_EXPIRES_IN) || 7 * 24 * 3600;
+
+        appendSetCookie(
+            res,
+            buildCookie({
+                name: "token",
+                value: token,
+                maxAgeSeconds: expiresSeconds,
+                path: "/",
+                httpOnly: true,
+                sameSite: "Lax",
+                secure: isProduction,
+            })
+        );
+
         return res.status(200).json({
             id: user._id,
             user: serializeUser(user),
-            token: generateToken(user._id),
         });
     } catch (err) {
         return res.status(500).json({ message: "error login user", error: err.message });
@@ -357,5 +401,18 @@ exports.exchangeGoogleCode = async (req, res) => {
     } catch (error) {
         console.error("Exchange Google code error:", error);
         return res.status(500).json({ message: "Failed to complete Google authentication" });
+    }
+};
+
+// Logout: clear the auth cookie
+exports.logout = async (req, res) => {
+    try {
+        clearCookie(res, 'token', '/');
+        return res.status(200).json({ message: 'Logged out successfully' });
+    } catch (error) {
+        console.error('Logout error:', error);
+        // Always attempt to clear cookie even on error
+        try { clearCookie(res, 'token', '/'); } catch (e) {}
+        return res.status(500).json({ message: 'Failed to log out' });
     }
 };
