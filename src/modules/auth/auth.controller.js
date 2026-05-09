@@ -83,19 +83,25 @@ const buildCookie = ({
     maxAgeSeconds,
     path = "/",
     httpOnly = true,
-    sameSite,
+    sameSite = "None",
     secure,
+    domain,
     expires,
 }) => {
+    // For localhost development (HTTP), don't use Secure flag
+    // For production/HTTPS, always use Secure flag
     const isLocalhost = getFrontendUrl().includes("localhost");
-    const finalSameSite = sameSite || (!isLocalhost || isProduction ? "None" : "Lax");
-    const finalSecure = secure !== undefined ? secure : (!isLocalhost || isProduction);
+    const finalSecure = secure !== undefined ? secure : (!isLocalhost && isProduction);
 
     const parts = [
         `${name}=${encodeURIComponent(String(value || ""))}`,
         `Path=${path}`,
-        `SameSite=${finalSameSite}`,
+        `SameSite=${sameSite}`,
     ];
+
+    if (domain) {
+        parts.push(`Domain=${domain}`);
+    }
 
     if (httpOnly) {
         parts.push("HttpOnly");
