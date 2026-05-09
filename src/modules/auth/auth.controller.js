@@ -1,12 +1,15 @@
 const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 const User = require("./user.model.js");
+const RefreshToken = require("./refreshToken.model.js");
 const redis = require("../../shared/config/redis.js");
 const { getClientIp } = require("../../shared/middlewares/rate-limit.middleware.js");
 const { serializeUser } = require("./user.serializer.js");
 const { generateOTP, sendOTPEmail, storeOTP, verifyOTP } = require("./auth.utils.js");
 
-const JWT_EXPIRES_IN = String(process.env.JWT_EXPIRES_IN || "7d").trim();
+const ACCESS_TOKEN_EXPIRES_IN = process.env.ACCESS_TOKEN_EXPIRES_IN || "15m";
+const REFRESH_TOKEN_EXPIRES_IN = process.env.REFRESH_TOKEN_EXPIRES_IN || "7d";
+
 const OAUTH_CODE_TTL_SECONDS = Number(process.env.OAUTH_CODE_TTL_SECONDS || 300);
 const GOOGLE_OAUTH_STATE_TTL_SECONDS = Number(
     process.env.GOOGLE_OAUTH_STATE_TTL_SECONDS || 300
@@ -31,22 +34,20 @@ const getRequiredJwtSecret = () => {
     return secret;
 };
 
-const generateToken = (id) =>
-    jwt.sign({ id }, getRequiredJwtSecret(), { expiresIn: JWT_EXPIRES_IN });
+const generateAccessToken = (id) =>
+    jwt.sign({ id }, getRequiredJwtSecret(), { expiresIn: ACCESS_TOKEN_EXPIRES_IN });
 
-const parseExpirySeconds = (input) => {
-    const s = String(input || "").trim();
-    if (!s) return undefined;
-    if (/^\d+$/.test(s)) return Number(s);
-    const m = s.match(/^(\d+)([smhd])$/i);
-    if (!m) return undefined;
-    const n = Number(m[1]);
-    const unit = m[2].toLowerCase();
-    if (unit === 's') return n;
-    if (unit === 'm') return n * 60;
-    if (unit === 'h') return n * 60 * 60;
-    if (unit === 'd') return n * 24 * 60 * 60;
-    return undefined;
+const generateRefreshToken = async (user, ipAddress) => {
+    const token = crypto.randomBytes(40).toString("hex");
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+
+    const refreshToken = await RefreshToken.create({
+        userId: user._id,
+        token,
+        expiresAt,
+    });
+
+    return refreshToken;
 };
 
 const appendSetCookie = (res, cookieValue) => {
@@ -204,18 +205,32 @@ exports.verifyOTPAndRegister = async (req, res) => {
             password,
             authProvider: "local",
         });
-        const token = generateToken(user._id);
-        const expiresSeconds = parseExpirySeconds(JWT_EXPIRES_IN) || 7 * 24 * 3600;
+
+        const accessToken = generateAccessToken(user._id);
+        const refreshToken = await generateRefreshToken(user, getClientIp(req));
 
         appendSetCookie(
             res,
             buildCookie({
-                name: "token",
-                value: token,
-                maxAgeSeconds: expiresSeconds,
+                name: "accessToken",
+                value: accessToken,
+                maxAgeSeconds: 15 * 60,
                 path: "/",
                 httpOnly: true,
-                sameSite: "Lax",
+                sameSite: "Strict",
+                secure: isProduction,
+            })
+        );
+
+        appendSetCookie(
+            res,
+            buildCookie({
+                name: "refreshToken",
+                value: refreshToken.token,
+                maxAgeSeconds: 7 * 24 * 3600,
+                path: "/",
+                httpOnly: true,
+                sameSite: "Strict",
                 secure: isProduction,
             })
         );
@@ -259,18 +274,31 @@ exports.loginUser = async (req, res) => {
             return res.status(400).json({ message: "Invalid credentials" });
         }
 
-        const token = generateToken(user._id);
-        const expiresSeconds = parseExpirySeconds(JWT_EXPIRES_IN) || 7 * 24 * 3600;
+        const accessToken = generateAccessToken(user._id);
+        const refreshToken = await generateRefreshToken(user, getClientIp(req));
 
         appendSetCookie(
             res,
             buildCookie({
-                name: "token",
-                value: token,
-                maxAgeSeconds: expiresSeconds,
+                name: "accessToken",
+                value: accessToken,
+                maxAgeSeconds: 15 * 60,
                 path: "/",
                 httpOnly: true,
-                sameSite: "Lax",
+                sameSite: "Strict",
+                secure: isProduction,
+            })
+        );
+
+        appendSetCookie(
+            res,
+            buildCookie({
+                name: "refreshToken",
+                value: refreshToken.token,
+                maxAgeSeconds: 7 * 24 * 3600,
+                path: "/",
+                httpOnly: true,
+                sameSite: "Strict",
                 secure: isProduction,
             })
         );
@@ -365,10 +393,13 @@ exports.googleAuthCallback = async (req, res) => {
             return redirectToFrontendLogin(res, "google_auth_failed");
         }
 
-        const token = generateToken(user._id);
+        const accessToken = generateAccessToken(user._id);
+        const refreshToken = await generateRefreshToken(user, getClientIp(req));
+
         const authCode = crypto.randomBytes(24).toString("hex");
         const payload = JSON.stringify({
-            token,
+            accessToken,
+            refreshToken: refreshToken.token,
             user: serializeUser(user),
         });
 
@@ -399,22 +430,132 @@ exports.exchangeGoogleCode = async (req, res) => {
         await redis.del(key);
 
         const parsedPayload = JSON.parse(storedPayload);
-        return res.status(200).json(parsedPayload);
+
+        // Set cookies when exchanging code
+        appendSetCookie(
+            res,
+            buildCookie({
+                name: "accessToken",
+                value: parsedPayload.accessToken,
+                maxAgeSeconds: 15 * 60,
+                path: "/",
+                httpOnly: true,
+                sameSite: "Strict",
+                secure: isProduction,
+            })
+        );
+
+        appendSetCookie(
+            res,
+            buildCookie({
+                name: "refreshToken",
+                value: parsedPayload.refreshToken,
+                maxAgeSeconds: 7 * 24 * 3600,
+                path: "/",
+                httpOnly: true,
+                sameSite: "Strict",
+                secure: isProduction,
+            })
+        );
+
+        return res.status(200).json({
+            id: parsedPayload.user.id,
+            user: parsedPayload.user,
+        });
     } catch (error) {
         console.error("Exchange Google code error:", error);
         return res.status(500).json({ message: "Failed to complete Google authentication" });
     }
 };
 
-// Logout: clear the auth cookie
+// Logout: clear the auth cookies and revoke refresh token
 exports.logout = async (req, res) => {
     try {
-        clearCookie(res, 'token', '/');
+        const cookies = parseCookies(req.headers.cookie);
+        const refreshToken = cookies.refreshToken;
+
+        if (refreshToken) {
+            const tokenDoc = await RefreshToken.findOne({ token: refreshToken });
+            if (tokenDoc) {
+                tokenDoc.revokedAt = new Date();
+                await tokenDoc.save();
+            }
+        }
+
+        clearCookie(res, 'accessToken', '/');
+        clearCookie(res, 'refreshToken', '/');
         return res.status(200).json({ message: 'Logged out successfully' });
     } catch (error) {
         console.error('Logout error:', error);
-        // Always attempt to clear cookie even on error
-        try { clearCookie(res, 'token', '/'); } catch (e) {}
+        clearCookie(res, 'accessToken', '/');
+        clearCookie(res, 'refreshToken', '/');
         return res.status(500).json({ message: 'Failed to log out' });
+    }
+};
+
+exports.refreshAccessToken = async (req, res) => {
+    const cookies = parseCookies(req.headers.cookie);
+    const refreshToken = cookies.refreshToken;
+
+    if (!refreshToken) {
+        return res.status(401).json({ message: "Refresh token not found" });
+    }
+
+    try {
+        const tokenDoc = await RefreshToken.findOne({ token: refreshToken });
+
+        if (!tokenDoc || !tokenDoc.isActive()) {
+            // If token is invalid or already revoked, it might be a reuse attack.
+            // In a production app, we might want to revoke all tokens for this user.
+            if (tokenDoc && !tokenDoc.isActive()) {
+                await RefreshToken.updateMany({ userId: tokenDoc.userId }, { revokedAt: new Date() });
+            }
+            return res.status(401).json({ message: "Invalid refresh token" });
+        }
+
+        // Rotate token: Issue new ones
+        const user = await User.findById(tokenDoc.userId);
+        if (!user) {
+            return res.status(401).json({ message: "User not found" });
+        }
+
+        const newAccessToken = generateAccessToken(user._id);
+        const newRefreshToken = await generateRefreshToken(user, getClientIp(req));
+
+        // Mark old token as replaced
+        tokenDoc.revokedAt = new Date();
+        tokenDoc.replacedByToken = newRefreshToken.token;
+        await tokenDoc.save();
+
+        appendSetCookie(
+            res,
+            buildCookie({
+                name: "accessToken",
+                value: newAccessToken,
+                maxAgeSeconds: 15 * 60,
+                path: "/",
+                httpOnly: true,
+                sameSite: "Strict",
+                secure: isProduction,
+            })
+        );
+
+        appendSetCookie(
+            res,
+            buildCookie({
+                name: "refreshToken",
+                value: newRefreshToken.token,
+                maxAgeSeconds: 7 * 24 * 3600,
+                path: "/",
+                httpOnly: true,
+                sameSite: "Strict",
+                secure: isProduction,
+            })
+        );
+
+        return res.status(200).json({ message: "Token refreshed successfully" });
+    } catch (error) {
+        console.error("Refresh token error:", error);
+        return res.status(500).json({ message: "Internal server error" });
     }
 };

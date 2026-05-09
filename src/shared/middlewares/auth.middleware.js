@@ -20,7 +20,7 @@ exports.protect = async(req, res, next) => {
                 return acc;
             }, {});
 
-        token = cookies.token;
+        token = cookies.accessToken;
     }
 
     if (!token) {return res.status(401).json({message: "Not authorized, no token"})};

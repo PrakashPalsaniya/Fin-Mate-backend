@@ -11,6 +11,7 @@ const {
     validateGoogleAuthState,
     verifyOTPAndRegister,
     logout,
+    refreshAccessToken,
 } = require("./auth.controller.js");
 const { protect } = require("../../shared/middlewares/auth.middleware.js");
 const {
@@ -32,6 +33,7 @@ router.post("/send-otp", otpSendRateLimiter, sendOTP);
 router.post("/verify-otp", otpVerifyRateLimiter, verifyOTPAndRegister);
 router.post("/login", loginRateLimiter, loginUser);
 router.post("/logout", logout);
+router.post("/refresh-token", refreshAccessToken);
 router.get("/getUser", protect, getUserInfo);
 
 router.get(
