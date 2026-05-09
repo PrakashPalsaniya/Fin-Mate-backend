@@ -83,23 +83,25 @@ const buildCookie = ({
     maxAgeSeconds,
     path = "/",
     httpOnly = true,
-    // For cross-site cookies (e.g. Vercel frontend -> separate backend),
-    // SameSite=None and Secure=true are REQUIRED.
-    sameSite = isProduction ? "None" : "Lax",
-    secure = isProduction,
+    sameSite,
+    secure,
     expires,
 }) => {
+    const isLocalhost = getFrontendUrl().includes("localhost");
+    const finalSameSite = sameSite || (!isLocalhost || isProduction ? "None" : "Lax");
+    const finalSecure = secure !== undefined ? secure : (!isLocalhost || isProduction);
+
     const parts = [
         `${name}=${encodeURIComponent(String(value || ""))}`,
         `Path=${path}`,
-        `SameSite=${sameSite}`,
+        `SameSite=${finalSameSite}`,
     ];
 
     if (httpOnly) {
         parts.push("HttpOnly");
     }
 
-    if (secure) {
+    if (finalSecure) {
         parts.push("Secure");
     }
 
