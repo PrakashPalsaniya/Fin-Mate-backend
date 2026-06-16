@@ -176,7 +176,8 @@ const startServer = async () => {
 
     const port = process.env.PORT || 5000;
     app.listen(port, () => {
-        console.log(`server running on port ${port}`);
+        const env = process.env.NODE_ENV || "development";
+        console.log(`[${new Date().toISOString()}] FinMate server running on port ${port} (${env})`);
     });
 
     startSummaryScheduler();

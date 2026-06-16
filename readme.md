@@ -63,7 +63,7 @@ CLIENT_URL=http://localhost:3000
 JWT_SECRET=your-jwt-secret
 GOOGLE_CLIENT_ID=your-google-client-id
 GOOGLE_CLIENT_SECRET=your-google-client-secret
-GOOGLE_CALLBACK_URL=http://localhost:5000/api/v1/auth/google/callback
+GOOGLE_CALLBACK_URL=http://3.110.131.185:5000/api/v1/auth/google/callback
 BREVO_API_KEY=your-brevo-api-key
 REDIS_URL=redis://localhost:6379
 GEMINI_API_KEY=your-gemini-api-key
@@ -78,7 +78,7 @@ TELEGRAM_PARSER_OPENROUTER_MODEL=openai/gpt-4o-mini
 npm run dev
 ```
 
-The backend runs on `http://localhost:5000`.
+The backend runs on `http://localhost:5000` by default.
 
 ## API Routes
 
@@ -185,5 +185,5 @@ Telegram transaction parsing uses the OpenRouter chat completions API. The rest 
 ## Notes
 
 - OTP storage falls back to in-memory storage if Redis is not reachable.
-- The frontend dev server is configured for `http://localhost:3000`.
+- The frontend dev server is configured for `http://localhost:5173`.
 - `CLIENT_URL` should match the frontend origin to avoid CORS issues.
