@@ -26,7 +26,7 @@ exports.addIncome = async (req, res) => {
             userId,
             payload: req.body,
         });
-        res.status(200).json(newIncome);
+        res.status(201).json(newIncome);
     } catch (error) {
         if (error instanceof TransactionServiceError) {
             return res.status(error.status).json({ message: error.message });

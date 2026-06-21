@@ -26,7 +26,7 @@ exports.addExpense = async (req, res) => {
             userId,
             payload: req.body,
         });
-        res.status(200).json(newExpense);
+        res.status(201).json(newExpense);
     } catch (error) {
         if (error instanceof TransactionServiceError) {
             return res.status(error.status).json({ message: error.message });
@@ -66,7 +66,7 @@ exports.getAllExpense = async (req, res) => {
     }
 }
 
-// DeExpense Source
+// Delete Expense Source
 exports.deleteExpense = async (req, res) => {
     try {
         const deletedExpense = await Expense.findOneAndDelete({
