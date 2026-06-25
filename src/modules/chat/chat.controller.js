@@ -6,6 +6,7 @@ const {
   logGeminiError,
 } = require("../ai/gemini.client.js");
 const { normalizeUserSettings } = require("../settings/settings.utils.js");
+const { classifyIntent } = require("./chat.intent.service.js");
 const {
   appendChatTurn,
   buildAssistantPromptContext,
@@ -63,11 +64,7 @@ const isSuspiciouslyIncompleteReply = (replyText, responseData) => {
 
   const words = normalizedReply.split(/\s+/).filter(Boolean);
 
-  if (!/[.!?]$/.test(normalizedReply) && words.length >= 5) {
-    return true;
-  }
-
-  if (/\b(and|but|because|so|that|which|you|your|have|with|about|to|for|this|my|our)$/i.test(normalizedReply)) {
+  if (words.length >= 5 && /\b(and|but|because|so|that|which|you|your|have|with|about|to|for|this|my|our)$/i.test(normalizedReply)) {
     return true;
   }
 
@@ -113,13 +110,22 @@ const financeBuddyChat = async (req, res) => {
     }
 
     const history = await getChatHistory(userId);
-    const directReply = await resolveDirectChatReply({
-      userId,
-      message: normalizedMessage,
-      language: selectedLanguage,
-      timeZone,
-      history,
-    });
+
+    // ── LLM Intent Classification (replaces regex routing) ───────────────────
+    const llmIntent = await classifyIntent(normalizedMessage, history);
+    console.log(`[IntentRouter - Sync] "${normalizedMessage}" → ${llmIntent ?? "regex-fallback"}`);
+
+    let directReply = null;
+    if (llmIntent !== "advice") {
+      directReply = await resolveDirectChatReply({
+        userId,
+        message: normalizedMessage,
+        language: selectedLanguage,
+        timeZone,
+        history,
+        intentOverride: llmIntent,
+      });
+    }
 
     if (directReply) {
       await appendChatTurn({
@@ -171,7 +177,7 @@ const financeBuddyChat = async (req, res) => {
           temperature: 0.35,
           topK: 24,
           topP: 0.9,
-          maxOutputTokens: 320,
+          maxOutputTokens: 700,
         },
       },
       {

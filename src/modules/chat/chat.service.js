@@ -889,8 +889,13 @@ async function getChatHistory(userId) {
         return [];
     }
 
-    const rawValue = await redis.get(buildMemoryKey(userId));
-    return parseStoredHistory(rawValue).slice(-CHAT_MEMORY_MAX_TURNS);
+    try {
+        const rawValue = await redis.get(buildMemoryKey(userId));
+        return parseStoredHistory(rawValue).slice(-CHAT_MEMORY_MAX_TURNS);
+    } catch (err) {
+        console.error("getChatHistory: Redis unavailable, continuing without memory:", err.message);
+        return [];
+    }
 }
 
 async function appendChatTurn({
@@ -915,11 +920,15 @@ async function appendChatTurn({
         createdAt: new Date().toISOString(),
     });
 
-    await redis.setEx(
-        buildMemoryKey(userId),
-        CHAT_MEMORY_TTL_SECONDS,
-        JSON.stringify(history.slice(-CHAT_MEMORY_MAX_TURNS))
-    );
+    try {
+        await redis.setEx(
+            buildMemoryKey(userId),
+            CHAT_MEMORY_TTL_SECONDS,
+            JSON.stringify(history.slice(-CHAT_MEMORY_MAX_TURNS))
+        );
+    } catch (err) {
+        console.error("appendChatTurn: Redis unavailable, turn not saved:", err.message);
+    }
 }
 
 async function resolveDirectChatReply({
@@ -928,13 +937,15 @@ async function resolveDirectChatReply({
     language = "english",
     timeZone,
     history = [],
+    intentOverride = null,
 }) {
     const normalizedMessage = String(message || "").trim().toLowerCase();
     const followUp = isFollowUpMessage(normalizedMessage);
     const lastContext = getLastResolvedContext(history);
     const { category } = parseCategoryFromMessage(normalizedMessage, lastContext, followUp);
     const { rangeKey } = parseRangeKeyFromMessage(normalizedMessage, lastContext, followUp);
-    const intent = resolveDirectIntent(normalizedMessage, lastContext, followUp);
+    // Use LLM-supplied intent if provided, otherwise fall back to regex classification
+    const intent = intentOverride || resolveDirectIntent(normalizedMessage, lastContext, followUp);
 
     if (!DIRECT_INTENTS.has(intent)) {
         return null;
